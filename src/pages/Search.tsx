@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Link } from "react-router-dom";
 import Layout from "@/components/Layout";
+import Layout_Auth from "@/components/Layout_Auth";
 import {
   Search as SearchIcon,
   MapPin,
@@ -21,7 +22,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
-  ListOrdered
+  ListOrdered,
+  LogIn // <-- Ícono LogIn añadido
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -45,7 +47,6 @@ interface Viaje {
 }
 
 // 2. Definir la consulta de GraphQL parametrizada para aceptar variables
-// Asumimos un tipo de entrada 'BuscarViajesInput' que recibe origen, destino y fecha.
 const BUSCAR_VIAJES_QUERY = `
   query BuscarViajes($input: BuscarViajesInput!) {
     buscarViajes(input: $input) {
@@ -65,12 +66,11 @@ const BUSCAR_VIAJES_QUERY = `
 // Constante para la paginación
 const ITEMS_PER_PAGE = 10;
 
-//
+// Obtener credenciales de localStorage (accesibles a nivel de módulo)
 const token = localStorage.getItem('token');
 const pasajeroId = localStorage.getItem('pasajeroId');
 
 // --- Función de Petición GraphQL ---
-// Ahora la función recibe variables para la consulta
 async function executeGraphQLQuery(query: string, variables: any = {}): Promise<{ buscarViajes: Viaje[] }> {
   // Implementación de Backoff Exponencial para retries (Opcional, pero buena práctica)
   const maxRetries = 3;
@@ -118,6 +118,30 @@ async function executeGraphQLQuery(query: string, variables: any = {}): Promise<
 
 // Componente principal (anteriormente solo búsqueda, ahora maneja vistas)
 const Search = () => {
+  // --- AÑADIDO: Verificación de Sesión ---
+  // Si no hay pasajeroId, mostramos el mensaje de acceso requerido.
+  if (!pasajeroId) {
+    return (
+      <Layout title="FleetGuard360" subtitle="Búsqueda de Viajes">
+        <div className="max-w-xl mx-auto text-center py-20 bg-white shadow-lg rounded-xl p-8">
+          <LogIn className="h-12 w-12 text-bus-primary mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-4">Acceso Requerido</h2>
+          <p className="text-muted-foreground mb-6">
+            Debe ingresar para buscar viajes. <br></br>
+            Por favor, inicie sesión.
+          </p>
+          <Button asChild className="bg-bus-primary hover:bg-bus-primary/90">
+            <Link to="/login">
+              <LogIn className="h-4 w-4 mr-2" />
+              Ingresar
+            </Link>
+          </Button>
+        </div>
+      </Layout>
+    );
+  }
+  // --- FIN AÑADIDO ---
+
   // --- Lógica de Vistas (AÑADIDO) ---
   const [view, setView] = useState<'search' | 'reservations'>('search');
   const goToReservations = () => setView('reservations');
@@ -228,8 +252,6 @@ const Search = () => {
     return "Disponible";
   };
 
-  // Función handleReserve ELIMINADA y reemplazada por Link en el JSX.
-
   const totalPages = Math.ceil(results.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
@@ -239,7 +261,7 @@ const Search = () => {
   const layoutTitle = 'Búsqueda de Reservas';
   const navigate = useNavigate()
   return (
-    <Layout title="FleetGuard360" subtitle={layoutTitle}>
+    <Layout_Auth title="FleetGuard360" subtitle={layoutTitle}>
       <div className="max-w-6xl mx-auto space-y-8">
 
         {/* Botón para Mis Reservas */}
@@ -249,12 +271,10 @@ const Search = () => {
             onClick={() => navigate('/mis-reservas')}
             className="text-bus-primary hover:bg-bus-primary/10 font-semibold"
             disabled={isLoading}
-        >
+          >
             <ArrowRight className="h-4 w-4 mr-2" />
             Mis reservas
-        </Button>
-
-        
+          </Button>
 
         </div>
         {/* Fin Botón para Mis Reservas */}
@@ -407,11 +427,6 @@ const Search = () => {
                   </Badge>
                 )}
               </CardTitle>
-              {searchData.origin && searchData.destination && searchData.date && (
-                <CardDescription>
-                  {searchData.origin} → {searchData.destination} • {format(searchData.date, "PPP", { locale: es })}
-                </CardDescription>
-              )}
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -435,7 +450,9 @@ const Search = () => {
                 <div className="space-y-4">
                   {currentResults.map((viaje) => (
                     <Card key={viaje.id} className="shadow-card border hover:shadow-elegant transition-smooth">
+                      
                       <CardContent className="p-6">
+                        
                         <div className="grid md:grid-cols-4 gap-4 items-center">
 
                           {/* Info Viaje (Cupos y Estado) */}
@@ -542,7 +559,7 @@ const Search = () => {
           </Card>
         )}
       </div>
-    </Layout>
+    </Layout_Auth>
   );
 };
 

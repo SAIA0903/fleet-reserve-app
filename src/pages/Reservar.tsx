@@ -4,8 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { Link } from "react-router-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
+import Layout_Auth from "@/components/Layout_Auth";
 import {
     MapPin,
     Calendar as CalendarIcon,
@@ -22,6 +24,7 @@ import {
     ArrowLeft,
     Ticket,
     Hash,
+    LogIn
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -127,25 +130,30 @@ const ReservationPage = () => {
     // ----------------------------------------------------------------------
     
     // 1. Prioridad: Falta información del Pasajero (LocalStorage) -> Ir a Registro
-    if (isPasajeroDataMissing) {
-        return <Layout title="Error" subtitle="Falta información de usuario">
-            <div className="text-center py-20 space-y-4">
-                <p className="text-xl font-bold text-red-600">Necesitamos saber quién reserva.</p>
-                <p className="text-sm text-muted-foreground">Por favor, ingrese al sistema para realizar una reserva.</p>
-                <Button 
-                    onClick={() => navigate('/register')} 
-                    variant="default" 
-                    className="text-white bg-bus-primary hover:bg-bus-primary/90"
-                >
-                    Ir al Ingreso
-                </Button>
-            </div>
-        </Layout>;
-    }
+    if (!pasajeroId) {
+    return (
+      <Layout title="FleetGuard360" subtitle="Búsqueda de Viajes">
+        <div className="max-w-xl mx-auto text-center py-20 bg-white shadow-lg rounded-xl p-8">
+          <LogIn className="h-12 w-12 text-bus-primary mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-4">Acceso Requerido</h2>
+          <p className="text-muted-foreground mb-6">
+            Debe ingresar para reservar. <br></br>
+            Por favor, inicie sesión.
+          </p>
+          <Button asChild className="bg-bus-primary hover:bg-bus-primary/90">
+            <Link to="/login">
+              <LogIn className="h-4 w-4 mr-2" />
+              Ingresar
+            </Link>
+          </Button>
+        </div>
+      </Layout>
+    );
+  }
 
     // 2. Segunda Prioridad: Falta información del Viaje (URL) -> Ir a Búsqueda
     if (isViajeDataMissing) {
-        return <Layout title="Error" subtitle="Datos de viaje incompletos">
+        return <Layout_Auth title="Error" subtitle="Datos de viaje incompletos">
             <div className="text-center py-20 space-y-4">
                 <p className="text-xl font-bold text-red-600"> No se pudo cargar el viaje.</p>
                 <p className="text-sm text-muted-foreground">Por favor, vuelve a la búsqueda y selecciona un viaje válido.</p>
@@ -157,7 +165,7 @@ const ReservationPage = () => {
                     Ir a la Búsqueda de Viajes
                 </Button>
             </div>
-        </Layout>;
+        </Layout_Auth>;
     }
     
     // ----------------------------------------------------------------------
@@ -173,7 +181,7 @@ const ReservationPage = () => {
         };
         
         return (
-            <Layout title="Reserva Confirmada" subtitle="¡Tu viaje está asegurado!">
+            <Layout_Auth title="Reserva Confirmada" subtitle="¡Tu viaje está asegurado!">
                 <div className="max-w-xl mx-auto space-y-8 text-center">
                     <CheckCircle className="h-20 w-20 mx-auto text-green-500" />
                     <Card className="shadow-2xl border-green-500/50">
@@ -202,18 +210,31 @@ const ReservationPage = () => {
                             </div>
                         </CardContent>
                     </Card>
-                    <Button onClick={() => navigate('/mis-reservas')} className="bg-bus-primary hover:bg-bus-primary/90">
-                        Ver Mis Reservas
-                    </Button>
+                    <div className="flex justify-center space-x-4">
+                        {/* Botón añadido para ir a la búsqueda */}
+                        <Button 
+                            onClick={() => navigate('/search')} 
+                            variant="outline" 
+                            className="border-bus-primary text-bus-primary hover:bg-bus-primary/10"
+                        >
+                            <ArrowLeft className="h-4 w-4 mr-2" />
+                            Buscar otro Viaje
+                        </Button>
+                        
+                        {/* Botón original */}
+                        <Button onClick={() => navigate('/mis-reservas')} className="bg-bus-primary hover:bg-bus-primary/90">
+                            Ver Mis Reservas
+                        </Button>
+                    </div>
                 </div>
-            </Layout>
+            </Layout_Auth>
         );
     }
     
     // Si la reserva falló, mostrar el mensaje de error
     if (reservationResult && !reservationResult.success) {
         return (
-            <Layout title="Reserva Fallida" subtitle="Ha ocurrido un error al procesar tu solicitud.">
+            <Layout_Auth title="Reserva Fallida" subtitle="Ha ocurrido un error al procesar tu solicitud.">
                 <div className="max-w-xl mx-auto space-y-8 text-center">
                     <XCircle className="h-20 w-20 mx-auto text-red-500" />
                     <Card className="shadow-2xl border-red-500/50">
@@ -228,7 +249,7 @@ const ReservationPage = () => {
                         </CardContent>
                     </Card>
                 </div>
-            </Layout>
+            </Layout_Auth>
         );
     }
 
@@ -415,7 +436,7 @@ const ReservationPage = () => {
 
     // --- Renderizado del Formulario ---
     return (
-        <Layout title="FleetGuard 360" subtitle={"Reservar Viaje"}>
+        <Layout_Auth title="FleetGuard 360" subtitle={"Reservar Viaje"}>
             <div className="max-w-4xl mx-auto space-y-8">
                 
                 {/* Botón de Regreso */}
@@ -558,7 +579,7 @@ const ReservationPage = () => {
                     </CardContent>
                 </Card>
             </div>
-        </Layout>
+        </Layout_Auth>
     );
 };
 

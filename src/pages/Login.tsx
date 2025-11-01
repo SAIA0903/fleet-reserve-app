@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 // [CORRECCIÓN] Se cambia la ruta absoluta (@) por una relativa para solucionar el error de compilación.
 import Layout from "../components/Layout"; 
 import { LogIn, ArrowLeft } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 // URL de tu endpoint GraphQL de Spring Boot
 const GRAPHQL_ENDPOINT = "http://localhost:8080/graphql";
@@ -22,6 +23,7 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { setAuthData } = useAuth();
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -102,7 +104,7 @@ const Login = () => {
         localStorage.setItem('pasajeroId',loginData.pasajero.id)
         localStorage.setItem('pasajeroNombre',loginData.pasajero.nombre)
         localStorage.setItem('pasajeroApellido',loginData.pasajero.apellido)
-        
+        setAuthData(loginData.token, loginData.pasajero);
         toast({
           title: "¡Inicio de sesión exitoso! 🚀",
           description: loginData.message || "Bienvenido a FleetGuard360.",
@@ -223,7 +225,7 @@ const Login = () => {
               </p>
               
               <Button variant="ghost" asChild className="text-muted-foreground">
-                <Link to="/" className="flex items-center gap-2">
+                <Link to="/search" className="flex items-center gap-2">
                   <ArrowLeft className="h-4 w-4" />
                   Volver al Inicio
                 </Link>

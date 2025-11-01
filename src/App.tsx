@@ -11,18 +11,18 @@ import Search from "./pages/Search";
 import NotFound from "./pages/NotFound";
 import MyReservations from "@/pages/MyReservations";
 import Reservar from "@/pages/Reservar";
-
+import ChangePassword from "./pages/ChangePassword";
+import { AuthProvider } from "./hooks/useAuth";
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <AuthProvider>
     <TooltipProvider>
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-        
-        {/* 1. Rutas que NO usan LayoutAuth (Públicas/Auth) */}
+      <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
@@ -30,11 +30,12 @@ const App = () => (
         <Route path="/search" element={<Search />} />
         <Route path="/mis-reservas" element={<MyReservations />} />
         <Route path="/reservar" element={<Reservar />} />
-        {/* Rutas sin Layout (Catch-all) */}
+        <Route path="/change-password" element={<ChangePassword />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       </BrowserRouter>
     </TooltipProvider>
+    </AuthProvider>
   </QueryClientProvider>
 );
 
