@@ -6,6 +6,7 @@ dist/
 build/
 out/
 .parcel-cache/ 
+node_modules/.vite/
 
 # Variables de entorno y secretos
 .env
