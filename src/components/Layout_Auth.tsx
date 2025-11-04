@@ -43,30 +43,21 @@ const Layout = ({ children, title, subtitle }: LayoutProps) => {
 
   // Show user icon only on Search page (authenticated pages)
 
-  const showUserIcon = location.pathname === "/search" || location.pathname === "/reservar" || location.pathname === "/mis-reservas";
+  //const showUserIcon = location.pathname === "/search" || location.pathname === "/reservar" || location.pathname === "/mis-reservas";
 
 
   const handleLogout = () => {
 
     // 1. ELIMINAR LA INFORMACIÓN DEL FRONTEND (Local Storage)
-
-   
-
     // Opción A: Eliminar todas las claves (token, user_data, settings, etc.)
-
     // Si tienes información que NO quieres borrar (ej. tema oscuro), usa la Opción B.
 
     localStorage.clear();
 
     // Opción B: Eliminar claves específicas (Recomendado para mayor control)
-
     //localStorage.removeItem("authToken"); // Clave del token de autenticación
-
     //localStorage.removeItem("userData"); // Clave de los datos del usuario
-
     // Agrega aquí cualquier otra clave que uses para la sesión
-
-
     // 2. Redirigir al usuario a la página de inicio o login
 
     navigate("/");
@@ -95,8 +86,6 @@ const Layout = ({ children, title, subtitle }: LayoutProps) => {
           </p>
 
          
-
-          {showUserIcon && (
 
             <div className="absolute top-6 right-4">
 
@@ -151,8 +140,6 @@ const Layout = ({ children, title, subtitle }: LayoutProps) => {
               </DropdownMenu>
 
             </div>
-
-          )}
 
         </div>
 

@@ -8,26 +8,43 @@ import { useToast } from "@/hooks/use-toast";
 import Layout from "@/components/Layout";
 import { ArrowLeft, Mail } from "lucide-react"; 
 
-// URL del endpoint GraphQL local
+// Define el endpoint para la comunicación con el servidor GraphQL
 const GRAPHQL_ENDPOINT = "http://localhost:8080/graphql";
 
 type ResetStep = "email"; 
 
+/**
+ * Componente principal para el flujo de restablecimiento de contraseña.
+ * Permite al usuario ingresar su correo electrónico para solicitar un restablecimiento.
+ */
 const ResetPassword = () => {
+    // Estado para controlar el paso actual del proceso (solo "email" por ahora)
     const [step, setStep] = useState<ResetStep>("email"); 
+    // Estado para almacenar los datos del formulario (correo electrónico)
     const [formData, setFormData] = useState({
         email: "",
     });
+    // Estado para gestionar los mensajes de error de validación del formulario
     const [errors, setErrors] = useState<Record<string, string>>({});
+    // Estado para indicar si la solicitud al servidor está en curso
     const [isLoading, setIsLoading] = useState(false);
+    // Hook para mostrar notificaciones al usuario
     const { toast } = useToast(); 
+    // Hook de navegación para redirigir al usuario
     const navigate = useNavigate(); 
 
+    /**
+     * Valida si la cadena proporcionada tiene un formato de correo electrónico válido.
+     */
     const validateEmail = (email: string) => {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         return emailRegex.test(email);
     };
 
+    /**
+     * Realiza la validación de los campos del formulario según el paso actual.
+     * Devuelve true si el formulario es válido, false en caso contrario.
+     */
     const validateForm = () => {
         const newErrors: Record<string, string> = {};
 
@@ -43,6 +60,10 @@ const ResetPassword = () => {
         return Object.keys(newErrors).length === 0;
     };
 
+    /**
+     * Maneja el envío del formulario.
+     * Realiza la validación y envía la mutación GraphQL para solicitar el restablecimiento.
+     */
     const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -53,14 +74,14 @@ const ResetPassword = () => {
     setIsLoading(true);
     
     try {
-        // 🚀 MEJORA: Definir la mutación con una variable ($email)
+        // Mutación GraphQL para solicitar el envío del correo de restablecimiento
         const sendPasswordResetMutation = `
             mutation SendResetPassword($email: String!) {
                 sendPasswordReset(email: $email)
             }
         `;
 
-        // 💡 MEJORA: Pasar las variables en un objeto separado
+        // Datos a enviar al endpoint GraphQL
         const graphqlPayload = {
             query: sendPasswordResetMutation,
             variables: {
@@ -73,34 +94,32 @@ const ResetPassword = () => {
             headers: {
                 'Content-Type': 'application/json',
             },
-            // Se envía el payload con 'query' y 'variables'
             body: JSON.stringify(graphqlPayload),
         });
 
         const result = await response.json();
         
-        // Manejo de errores de GraphQL (sin notificar al usuario, como se solicitó)
+        // Manejo de errores de GraphQL 
         if (result.errors) {
-            console.error("GraphQL Errors:", result.errors);
-            // Aunque no notificamos, si hay un error crítico, 
-            // no deberíamos limpiar el formulario.
-            // Si el backend siempre devuelve un error en caso de fallo (ej: email no encontrado),
-            // se puede manejar aquí sin `throw`, solo haciendo `return`.
+            console.error("Errores en la respuesta del servidor.");
+            // No se notifica al usuario final sobre errores internos/del servidor 
         }
         
     } catch (error) {
-        // Manejo de errores de red o errores inesperados de fetch
-        console.error("Error al solicitar restablecimiento de contraseña:", error);
+        // Manejo de errores de red. No se notifica al usuario final.
+        console.error("Error inesperado en la solicitud.");
     } finally {
         setIsLoading(false);
         
-        // La limpieza del formulario se mantiene aquí. 
-        // Si el requisito fuera NO limpiar el email en caso de error, 
-        // se debería mover esta línea dentro del 'try' ANTES del `if (result.errors)`.
+        // Limpia el campo del formulario tras intentar el envío
         setFormData({ email: "" }); 
     }
 };
 
+    /**
+     * Actualiza el estado del formulario con el nuevo valor.
+     * También limpia el error asociado al campo si existe.
+     */
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
         
@@ -109,10 +128,13 @@ const ResetPassword = () => {
         }
     };
 
+    // Devuelve el icono de correo para el encabezado
     const getStepIcon = () => <Mail className="h-8 w-8 text-bus-primary" />;
 
+    // Devuelve el título de la tarjeta
     const getStepTitle = () => "Restablecer Contraseña";
 
+    // Devuelve la descripción de la tarjeta
     const getStepDescription = () => 
         "Ingresa tu correo electrónico para restablcer tu contraseña"; 
 

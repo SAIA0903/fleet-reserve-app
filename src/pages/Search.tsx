@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,8 @@ import {
   ListOrdered,
   LogIn // <-- Ícono LogIn añadido
 } from "lucide-react";
-import { format } from "date-fns";
+// Importamos 'addDays' de date-fns para el ajuste de fecha
+import { format, parseISO, addDays } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
@@ -40,13 +41,13 @@ interface Viaje {
   destino: string;
   fecha: string;
   horaSalida: string;
-  horaLlegada: string;
+  horaLlegada: string; // Incluida para determinar el fin del viaje
   cuposTotales: number;
   cuposDisponibles: number;
   estado: string;
 }
 
-// 2. Definir la consulta de GraphQL parametrizada para aceptar variables
+// 2. Definir la consulta de GraphQL parametrizada para buscar viajes
 const BUSCAR_VIAJES_QUERY = `
   query BuscarViajes($input: BuscarViajesInput!) {
     buscarViajes(input: $input) {
@@ -63,6 +64,13 @@ const BUSCAR_VIAJES_QUERY = `
   }
 `;
 
+// 3. Definir la consulta para obtener la lista de ciudades
+const BUSCAR_CIUDADES_QUERY_LIST = `
+  query {
+    buscarCiudades
+  }
+`;
+
 // Constante para la paginación
 const ITEMS_PER_PAGE = 10;
 
@@ -70,9 +78,85 @@ const ITEMS_PER_PAGE = 10;
 const token = localStorage.getItem('token');
 const pasajeroId = localStorage.getItem('pasajeroId');
 
-// --- Función de Petición GraphQL ---
-async function executeGraphQLQuery(query: string, variables: any = {}): Promise<{ buscarViajes: Viaje[] }> {
-  // Implementación de Backoff Exponencial para retries (Opcional, pero buena práctica)
+// =========================================================================
+// --- Lógica de Fechas (MODIFICADA) ---
+// =========================================================================
+
+/**
+ * Combina fecha (YYYY-MM-DD) y hora (HH:mm:ss) en un objeto Date,
+ * forzando la interpretación en la zona horaria local del usuario para evitar desfases.
+ * * @param dateStr La fecha del viaje (YYYY-MM-DD), que es la fecha de SALIDA.
+ * @param timeStr La hora a establecer (HH:mm:ss).
+ * @param isArrivalTime Indica si la hora es de llegada. Requiere 'timeOfDeparture' para el cálculo de cambio de día.
+ * @param timeOfDeparture La hora de salida (HH:mm:ss), necesaria para determinar si la llegada es al día siguiente.
+ */
+const getTripDateTime = (dateStr: string, timeStr: string, isArrivalTime: boolean = false, timeOfDeparture: string | null = null): Date => {
+  // 1. Parseamos la fecha ISO YYYY-MM-DD.
+  let tripDateTime = parseISO(dateStr);
+
+  // 2. Extraemos las horas, minutos y segundos de timeStr (ej: "15:30:00").
+  const [hoursStr, minutesStr, secondsStr = '0'] = timeStr.split(':');
+  const hours = parseInt(hoursStr, 10);
+  const minutes = parseInt(minutesStr, 10);
+  const seconds = parseInt(secondsStr, 10);
+
+  // 3. Establecemos la hora, minutos y segundos.
+  tripDateTime.setHours(hours, minutes, seconds, 0);
+
+  // 4. Lógica de ajuste para la hora de llegada si es anterior a la hora de salida.
+  if (isArrivalTime && timeOfDeparture) {
+    const [depHoursStr, depMinutesStr] = timeOfDeparture.split(':');
+    const depHours = parseInt(depHoursStr, 10);
+    const depMinutes = parseInt(depMinutesStr, 10);
+
+    // Creamos un Date para la salida solo con la hora para comparar.
+    // Esto es puramente comparativo para el "día siguiente".
+    const departureTimeOnly = new Date(0); // Fecha arbitraria
+    departureTimeOnly.setHours(depHours, depMinutes);
+
+    // Creamos un Date para la llegada solo con la hora para comparar.
+    const arrivalTimeOnly = new Date(0); // Fecha arbitraria
+    arrivalTimeOnly.setHours(hours, minutes);
+
+    // Si la hora de llegada es estrictamente ANTES que la hora de salida,
+    // asumimos que el viaje termina al día siguiente.
+    if (arrivalTimeOnly.getTime() < departureTimeOnly.getTime()) {
+      // Añadimos un día a la fecha, que inicialmente es la fecha de salida.
+      tripDateTime = addDays(tripDateTime, 1);
+    }
+  }
+
+  return tripDateTime;
+};
+
+/**
+ * Determina si el viaje ya ha iniciado (la hora de salida es en el pasado).
+ */
+const isTripStarted = (dateStr: string, timeStr: string): boolean => {
+  const tripDateTime = getTripDateTime(dateStr, timeStr, false); // Es hora de salida
+  const now = new Date();
+  return now > tripDateTime;
+};
+
+/**
+ * Determina si el viaje ya finalizó (la hora de llegada es en el pasado),
+ * considerando el posible cambio de día.
+ * * @param dateStr Fecha de salida.
+ * @param arrivalTimeStr Hora de llegada.
+ * @param departureTimeStr Hora de salida.
+ */
+const isTripEnded = (dateStr: string, arrivalTimeStr: string, departureTimeStr: string): boolean => {
+    // Usamos la lógica de getTripDateTime para calcular la hora de llegada correcta (con o sin día extra)
+    const tripEndDateTime = getTripDateTime(dateStr, arrivalTimeStr, true, departureTimeStr);
+    const now = new Date();
+    return now > tripEndDateTime;
+};
+// =========================================================================
+// --- FIN Lógica de Fechas (MODIFICADA) ---
+// =========================================================================
+
+// --- Función de Petición GraphQL (Se mantiene igual) ---
+async function executeGraphQLQuery(query: string, variables: any = {}): Promise<any> {
   const maxRetries = 3;
   let attempt = 0;
 
@@ -82,7 +166,6 @@ async function executeGraphQLQuery(query: string, variables: any = {}): Promise<
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // Incluye aquí otros headers necesarios, como 'Authorization'
         },
         body: JSON.stringify({
           query: query,
@@ -106,20 +189,23 @@ async function executeGraphQLQuery(query: string, variables: any = {}): Promise<
       if (attempt === maxRetries - 1) {
         throw error; // Lanzar el error final
       }
-      // Esperar con backoff exponencial
       const delay = Math.pow(2, attempt) * 1000;
       await new Promise(resolve => setTimeout(resolve, delay));
       attempt++;
     }
   }
-  // Esto no debería ser alcanzable, pero por tipado
   throw new Error("Fallo la petición después de múltiples reintentos.");
 }
 
-// Componente principal (anteriormente solo búsqueda, ahora maneja vistas)
+// Componente principal
 const Search = () => {
-  // --- AÑADIDO: Verificación de Sesión ---
-  // Si no hay pasajeroId, mostramos el mensaje de acceso requerido.
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  const [availableCities, setAvailableCities] = useState<string[]>([]);
+  const [isCitiesLoading, setIsCitiesLoading] = useState(true);
+
+  // --- AÑADIDO: Verificación de Sesión (Se mantiene igual) ---
   if (!pasajeroId) {
     return (
       <Layout title="FleetGuard360" subtitle="Búsqueda de Viajes">
@@ -142,11 +228,49 @@ const Search = () => {
   }
   // --- FIN AÑADIDO ---
 
-  // --- Lógica de Vistas (AÑADIDO) ---
-  const [view, setView] = useState<'search' | 'reservations'>('search');
-  const goToReservations = () => setView('reservations');
-  const goToSearch = () => setView('search');
-  // ------------------------------------
+  // --- Lógica de Carga de Ciudades (Se mantiene igual) ---
+  const fetchCities = async () => {
+    setIsCitiesLoading(true);
+    try {
+      const data = await executeGraphQLQuery(BUSCAR_CIUDADES_QUERY_LIST);
+      const fetchedCities: string[] = data?.buscarCiudades || [];
+      
+      sessionStorage.setItem('cities', JSON.stringify(fetchedCities));
+      setAvailableCities(fetchedCities);
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Error de red o servidor desconocido.";
+      console.error("Error fetching cities:", error);
+      toast({
+        title: "Error de conexión",
+        description: `No se pudieron cargar las ciudades disponibles. ${message}`,
+        variant: "destructive",
+      });
+      setAvailableCities([]);
+    } finally {
+      setIsCitiesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const cachedCities = sessionStorage.getItem('cities');
+    
+    if (cachedCities) {
+      try {
+        const parsedCities: string[] = JSON.parse(cachedCities);
+        setAvailableCities(parsedCities);
+        setIsCitiesLoading(false);
+      } catch (e) {
+        console.error("Error parsing cached cities, refetching:", e);
+        sessionStorage.removeItem('cities');
+        fetchCities();
+      }
+    } else {
+      fetchCities();
+    }
+  }, []);
+  // --- FIN Lógica de Carga de Ciudades ---
+
 
   const [searchData, setSearchData] = useState({
     origin: "",
@@ -159,17 +283,10 @@ const Search = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // ESTADO NUEVO para controlar el cierre automático del Popover
   const [isDatePopoverOpen, setIsDatePopoverOpen] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const { toast } = useToast();
-
-  const cities = [
-    "Bogotá", "Medellín", "Cali", "Barranquilla", "Cartagena",
-    "Bucaramanga", "Pereira", "Manizales", "Armenia", "Ibagué",
-    "Santa Marta", "Villavicencio"
-  ];
+  
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -196,7 +313,6 @@ const Search = () => {
     try {
       const fechaISO = format(searchData.date!, "yyyy-MM-dd");
 
-      // 3. Construir el objeto de variables dinámicamente
       const variables = {
         input: {
           origen: searchData.origin,
@@ -205,11 +321,10 @@ const Search = () => {
         },
       };
 
-      // 4. Ejecutar la consulta con la query parametrizada y las variables
       const data = await executeGraphQLQuery(BUSCAR_VIAJES_QUERY, variables);
 
       if (data && data.buscarViajes) {
-        const sortedViajes = [...data.buscarViajes].sort((a, b) =>
+        const sortedViajes = [...data.buscarViajes].sort((a: Viaje, b: Viaje) =>
           a.horaSalida.localeCompare(b.horaSalida)
         );
 
@@ -217,7 +332,6 @@ const Search = () => {
         toast({
           title: "Búsqueda completada",
           description: `Se encontraron ${sortedViajes.length} opciones de viaje`,
-          // Nota: El tipo 'success' debe estar definido en tu hook 'use-toast'
         });
       } else {
         toast({
@@ -238,14 +352,18 @@ const Search = () => {
     }
   };
 
-  const getAvailabilityColor = (available: number, total: number) => {
+  const getAvailabilityColor = (available: number, total: number, isRunning: boolean, isPast: boolean) => {
+    if (isPast) return "bg-gray-400"; // Gris para finalizado/transcurrido
+    if (isRunning) return "bg-blue-500"; // Azul para en curso
     const percentage = (available / total) * 100;
     if (percentage === 0) return "bg-bus-danger";
     if (percentage < 30) return "bg-bus-warning";
     return "bg-bus-success";
   };
 
-  const getAvailabilityText = (available: number, total: number) => {
+  const getAvailabilityText = (available: number, total: number, isRunning: boolean, isPast: boolean) => {
+    if (isPast) return "Finalizado";
+    if (isRunning) return "En Curso";
     const percentage = (available / total) * 100;
     if (percentage === 0) return "Agotado";
     if (percentage < 30) return "Pocas plazas";
@@ -259,7 +377,7 @@ const Search = () => {
 
   // --- Renderizado Condicional de Vistas ---
   const layoutTitle = 'Búsqueda de Reservas';
-  const navigate = useNavigate()
+  
   return (
     <Layout_Auth title="FleetGuard360" subtitle={layoutTitle}>
       <div className="max-w-6xl mx-auto space-y-8">
@@ -270,7 +388,7 @@ const Search = () => {
             variant="ghost"
             onClick={() => navigate('/mis-reservas')}
             className="text-bus-primary hover:bg-bus-primary/10 font-semibold"
-            disabled={isLoading}
+            disabled={isLoading || isCitiesLoading}
           >
             <ArrowRight className="h-4 w-4 mr-2" />
             Mis reservas
@@ -284,6 +402,9 @@ const Search = () => {
             <CardTitle className="flex items-center gap-2 text-2xl">
               <SearchIcon className="h-6 w-6 text-bus-primary" />
               Buscar Viajes
+              {isCitiesLoading && (
+                <span className="text-sm font-normal text-muted-foreground ml-2">Cargando ciudades...</span>
+              )}
             </CardTitle>
             <CardDescription>
               Encuentra tu viaje perfecto seleccionando origen, destino y fecha
@@ -292,7 +413,7 @@ const Search = () => {
           <CardContent>
             <form onSubmit={handleSearch} className="grid md:grid-cols-4 gap-4 items-start" noValidate>
 
-              {/* Ciudad de Origen (CORREGIDO) - El Select se cierra automáticamente */}
+              {/* Ciudad de Origen (Se mantiene igual) */}
               <div className="space-y-2">
                 <Label htmlFor="origin" className="flex items-center gap-1">
                   <MapPin className="h-4 w-4 text-bus-primary" />
@@ -300,19 +421,18 @@ const Search = () => {
                 </Label>
                 <Select
                   value={searchData.origin}
-                  // El Select cierra automáticamente al seleccionar un Item.
                   onValueChange={(value) => {
                     setSearchData(prev => ({ ...prev, origin: value }));
                     if (errors.origin) setErrors(prev => ({ ...prev, origin: "" }));
                   }}
+                  disabled={isCitiesLoading}
                 >
                   <SelectTrigger className={errors.origin ? "border-bus-danger focus:ring-bus-danger" : ""}>
-                    <SelectValue placeholder="Seleccionar origen" />
+                    <SelectValue placeholder={isCitiesLoading ? "Cargando..." : "Seleccionar origen"} />
                   </SelectTrigger>
-                  {/* SelectContent abre hacia abajo por defecto */}
                   <SelectContent>
-                    {/* Filtra para no poder seleccionar el mismo destino */}
-                    {cities.filter(city => city !== searchData.destination).map((city) => (
+                    {/* Usamos availableCities cargadas desde el backend/cache */}
+                    {availableCities.filter(city => city !== searchData.destination).map((city) => (
                       <SelectItem key={city} value={city}>{city}</SelectItem>
                     ))}
                   </SelectContent>
@@ -322,7 +442,7 @@ const Search = () => {
                 </div>
               </div>
 
-              {/* Ciudad de Destino (AÑADIDO) - El Select se cierra automáticamente */}
+              {/* Ciudad de Destino (Se mantiene igual) */}
               <div className="space-y-2">
                 <Label htmlFor="destination" className="flex items-center gap-1">
                   <MapPin className="h-4 w-4 text-bus-primary" />
@@ -330,19 +450,18 @@ const Search = () => {
                 </Label>
                 <Select
                   value={searchData.destination}
-                  // El Select cierra automáticamente al seleccionar un Item.
                   onValueChange={(value) => {
                     setSearchData(prev => ({ ...prev, destination: value }));
                     if (errors.destination) setErrors(prev => ({ ...prev, destination: "" }));
                   }}
+                  disabled={isCitiesLoading}
                 >
                   <SelectTrigger className={errors.destination ? "border-bus-danger focus:ring-bus-danger" : ""}>
-                    <SelectValue placeholder="Seleccionar destino" />
+                    <SelectValue placeholder={isCitiesLoading ? "Cargando..." : "Seleccionar destino"} />
                   </SelectTrigger>
-                  {/* SelectContent abre hacia abajo por defecto */}
                   <SelectContent>
-                    {/* Filtra para no poder seleccionar el mismo origen */}
-                    {cities.filter(city => city !== searchData.origin).map((city) => (
+                    {/* Usamos availableCities cargadas desde el backend/cache */}
+                    {availableCities.filter(city => city !== searchData.origin).map((city) => (
                       <SelectItem key={city} value={city}>{city}</SelectItem>
                     ))}
                   </SelectContent>
@@ -352,7 +471,7 @@ const Search = () => {
                 </div>
               </div>
 
-              {/* Date Picker (MODIFICADO para cierre automático) */}
+              {/* Date Picker (Se mantiene igual) */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-1">
                   <CalendarIcon className="h-4 w-4 text-bus-primary" />
@@ -368,6 +487,7 @@ const Search = () => {
                         !searchData.date && "text-muted-foreground",
                         errors.date && "border-bus-danger focus:ring-bus-danger"
                       )}
+                      disabled={isCitiesLoading}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {searchData.date ? (
@@ -387,6 +507,7 @@ const Search = () => {
                         // CIERRE AUTOMÁTICO: Cerramos el popover al seleccionar una fecha
                         setIsDatePopoverOpen(false);
                       }}
+                      // Deshabilitar fechas pasadas
                       disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
                       initialFocus
                       className="p-3 pointer-events-auto"
@@ -398,16 +519,16 @@ const Search = () => {
                 </div>
               </div>
 
-              {/* Submit Button */}
+              {/* Submit Button (Se mantiene igual) */}
               <div className="space-y-2">
                 {/* La etiqueta vacía para alinear el botón con los inputs */}
                 <Label className="opacity-0 select-none">Buscar</Label>
                 <Button
                   type="submit"
                   className="w-full bg-accent hover:bg-accent-hover text-accent-foreground shadow-button transition-smooth h-10"
-                  disabled={isLoading}
+                  disabled={isLoading || isCitiesLoading || availableCities.length === 0}
                 >
-                  {isLoading ? "Buscando..." : "Buscar"}
+                  {isLoading ? "Buscando..." : (isCitiesLoading ? "Cargando..." : "Buscar")}
                 </Button>
                 <div className="h-5"></div>
               </div>
@@ -448,84 +569,118 @@ const Search = () => {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {currentResults.map((viaje) => (
-                    <Card key={viaje.id} className="shadow-card border hover:shadow-elegant transition-smooth">
-                      
-                      <CardContent className="p-6">
+                  {currentResults.map((viaje) => {
+                    // --- LÓGICA DE ESTADO EN CURSO (AJUSTADA) ---
+                    const started = isTripStarted(viaje.fecha, viaje.horaSalida);
+                    // Uso de la función mejorada:
+                    const ended = isTripEnded(viaje.fecha, viaje.horaLlegada, viaje.horaSalida);
+                    const isRunning = started && !ended; // El viaje está en recorrido si ha empezado pero no ha terminado.
+
+                    const isAvailable = viaje.cuposDisponibles > 0;
+                    
+                    // Condición ACTUALIZADA: Deshabilitado si ya terminó (ended) O no tiene cupos (!isAvailable).
+                    // Los viajes en curso (isRunning) SÍ están habilitados si isAvailable es true.
+                    const isDisabled = ended || !isAvailable; 
+                    
+                    let buttonText = "Reservar";
+                    let statusText = "Disponible";
+
+                    if (!isAvailable) {
+                      buttonText = "Agotado";
+                      statusText = "Agotado";
+                    } else if (ended) {
+                      buttonText = "Transcurrido";
+                      statusText = "Finalizado";
+                    } else if (isRunning) {
+                      // Viaje en curso: Se permite reservar si hay cupos (isAvailable).
+                      buttonText = "Reservar";
+                      statusText = "En Curso";
+                    } else {
+                        // Viaje futuro normal (isAvailable sigue siendo la fuente principal)
+                        statusText = getAvailabilityText(viaje.cuposDisponibles, viaje.cuposTotales, isRunning, ended);
+                    }
+                    // --- FIN LÓGICA DE ESTADO EN CURSO ---
+
+                    return (
+                      <Card key={viaje.id} className="shadow-card border hover:shadow-elegant transition-smooth">
                         
-                        <div className="grid md:grid-cols-4 gap-4 items-center">
+                        <CardContent className="p-6">
+                          
+                          <div className="grid md:grid-cols-4 gap-4 items-center">
 
-                          {/* Info Viaje (Cupos y Estado) */}
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <Badge
-                                className={cn(
-                                  "text-white border-0",
-                                  getAvailabilityColor(viaje.cuposDisponibles, viaje.cuposTotales)
-                                )}
-                              >
-                                <Users className="h-3 w-3 mr-1" />
-                                {viaje.cuposDisponibles}/{viaje.cuposTotales}
-                              </Badge>
-                              <span className="text-sm text-muted-foreground">
-                                {getAvailabilityText(viaje.cuposDisponibles, viaje.cuposTotales)}
-                              </span>
+                            {/* Info Viaje (Cupos y Estado) */}
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  className={cn(
+                                    "text-white border-0",
+                                    // Pasamos los nuevos estados para colores más precisos
+                                    getAvailabilityColor(viaje.cuposDisponibles, viaje.cuposTotales, isRunning, ended)
+                                  )}
+                                >
+                                  <Users className="h-3 w-3 mr-1" />
+                                  {viaje.cuposDisponibles}/{viaje.cuposTotales}
+                                </Badge>
+                                <span className="text-sm text-muted-foreground">
+                                  {statusText}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                <Info className="h-4 w-4" />
+                                Estado: <span className="font-medium text-foreground">{viaje.estado}</span>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                              <Info className="h-4 w-4" />
-                              Estado: <span className="font-medium text-foreground">{viaje.estado}</span>
+
+                            {/* Time (Se mantiene igual) */}
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <Clock className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-medium">{viaje.horaSalida}</span>
+                                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-medium">{viaje.horaLlegada}
+                                </span>
+                              </div>
+                              <p className="text-sm text-muted-foreground">
+                              </p>
+                            </div>
+
+                            {/* Locations (Se mantiene igual) */}
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">Desde: {viaje.origen}</p>
+                              <p className="text-sm text-muted-foreground">Hasta: {viaje.destino}</p>
+                            </div>
+
+                            {/* Reserve Button (AJUSTADO para usar 'isDisabled' y 'buttonText' actualizados) */}
+                            <div className="text-right">
+                              {isDisabled ? (
+                                <Button
+                                  disabled
+                                  className="w-full md:w-auto transition-smooth bg-muted text-muted-foreground cursor-not-allowed"
+                                  aria-label={`Viaje ${buttonText.toLowerCase()}`}
+                                >
+                                  {buttonText}
+                                </Button>
+                              ) : (
+                                <Button
+                                  asChild
+                                  className="w-full md:w-auto transition-smooth bg-accent hover:bg-accent-hover text-accent-foreground shadow-button"
+                                  aria-label={`Reservar viaje ${viaje.id}`}
+                                >
+                                  <Link to={`/reservar?viajeId=${viaje.id}&viajeOrigen=${viaje.origen}&viajeDestino=${viaje.destino}&viajeCuposDisponibles=${viaje.cuposDisponibles}&viajeFecha=${viaje.fecha}&viajeHora=${viaje.horaSalida}`}>
+                                    {buttonText}
+                                  </Link>
+                                </Button>
+                              )}
                             </div>
                           </div>
-
-                          {/* Time */}
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <Clock className="h-4 w-4 text-muted-foreground" />
-                              <span className="font-medium">{viaje.horaSalida}</span>
-                              <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                              <span className="font-medium">{viaje.horaLlegada}</span>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                            </p>
-                          </div>
-
-                          {/* Locations */}
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium">Desde: {viaje.origen}</p>
-                            <p className="text-sm text-muted-foreground">Hasta: {viaje.destino}</p>
-                          </div>
-
-                          {/* Reserve Button (MODIFICADO PARA USAR LINK) */}
-                          <div className="text-right">
-                            {viaje.cuposDisponibles === 0 ? (
-                              <Button
-                                disabled
-                                className="w-full md:w-auto transition-smooth bg-muted text-muted-foreground cursor-not-allowed"
-                                aria-label={`Viaje agotado`}
-                              >
-                                Agotado
-                              </Button>
-                            ) : (
-                              <Button
-                                asChild
-                                className="w-full md:w-auto transition-smooth bg-accent hover:bg-accent-hover text-accent-foreground shadow-button"
-                                aria-label={`Reservar viaje ${viaje.id}`}
-                              >
-                                <Link to={`/reservar?viajeId=${viaje.id}&viajeOrigen=${viaje.origen}&viajeDestino=${viaje.destino}&viajeCuposDisponibles=${viaje.cuposDisponibles}&viajeFecha=${viaje.fecha}&viajeHora=${viaje.horaSalida}`}>
-                                  Reservar
-                                </Link>
-                              </Button>
-                            )}
-                          </div>
-                          {/* FIN MODIFICACIÓN */}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </div>
               )}
 
-              {/* Componente de Paginación */}
+              {/* Componente de Paginación (Se mantiene igual) */}
               {results.length > ITEMS_PER_PAGE && (
                 <div className="flex items-center justify-between pt-6 mt-6 border-t">
                   <div>

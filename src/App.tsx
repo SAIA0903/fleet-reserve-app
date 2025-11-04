@@ -12,6 +12,7 @@ import NotFound from "./pages/NotFound";
 import MyReservations from "@/pages/MyReservations";
 import Reservar from "@/pages/Reservar";
 import ChangePassword from "./pages/ChangePassword";
+import BusTrackingPage from "./pages/BusTrackingPage";
 import { AuthProvider } from "./hooks/useAuth";
 const queryClient = new QueryClient();
 
@@ -31,6 +32,7 @@ const App = () => (
         <Route path="/mis-reservas" element={<MyReservations />} />
         <Route path="/reservar" element={<Reservar />} />
         <Route path="/change-password" element={<ChangePassword />} />
+        <Route path="/mapa" element={<BusTrackingPage/>}/>
         <Route path="*" element={<NotFound />} />
       </Routes>
       </BrowserRouter>

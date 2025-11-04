@@ -78,12 +78,13 @@ interface GraphQLResponse {
 
 // --- Componente principal de Reserva ---
 const ReservationPage = () => {
-    // Hooks de React Router y Toast
+    // Inicializa hooks para navegación, notificaciones (toast) y parámetros de URL.
     const navigate = useNavigate();
     const { toast } = useToast();
     const [searchParams] = useSearchParams();
 
-    // --- Extracción de datos de la URL (Query Params) ---
+    // --- Extracción de datos del Viaje desde la URL (Query Params) ---
+    // Procesa los parámetros de la URL para construir el objeto de datos del viaje.
     const viajeData: Viaje = useMemo(() => {
         const id = searchParams.get('viajeId') || '';
         const origen = searchParams.get('viajeOrigen') || '';
@@ -100,33 +101,40 @@ const ReservationPage = () => {
 
     const viaje: Viaje = viajeData;
     
-    // Bandera para saber si faltan datos del viaje en la URL
+    // Bandera para verificar la completitud de los datos del viaje.
     const isViajeDataMissing = !viaje.id || !viaje.origen || !viaje.destino || !viaje.fecha || !viaje.horaSalida;
 
 
-    // --- Extracción de datos de LocalStorage ---
+    // --- Extracción de datos del Pasajero desde LocalStorage ---
+    // Obtiene el nombre completo del pasajero principal de LocalStorage.
     const pasajeroNombreCompleto = useMemo(() => {
         const nombre = localStorage.getItem('pasajeroNombre') || '';
         const apellido = localStorage.getItem('pasajeroApellido') || '';
         return { nombre, apellido, completo: `${nombre} ${apellido}`.trim() };
     }, []);
 
+    // Obtiene el ID del pasajero principal de LocalStorage.
     const pasajeroId = useMemo(() => localStorage.getItem('pasajeroId'), []);
     
-    // Bandera para saber si faltan datos del pasajero en LocalStorage
+    // Bandera para verificar si faltan datos del pasajero principal.
     const isPasajeroDataMissing = !pasajeroNombreCompleto.nombre || !pasajeroId;
 
 
     // --- Estados del Formulario ---
+    // Almacena la cantidad de asientos a reservar.
     const [asientos, setAsientos] = useState(1);
+    // Almacena los datos de los pasajeros adicionales.
     const [pasajerosAdicionales, setPasajerosAdicionales] = useState<Pasajero[]>([]);
+    // Almacena los errores de validación del formulario.
     const [errors, setErrors] = useState<Record<string, string>>({});
+    // Indica si se está esperando una respuesta del servidor.
     const [loading, setLoading] = useState(false);
+    // Almacena el resultado de la operación de reserva.
     const [reservationResult, setReservationResult] = useState<GraphQLResponse | null>(null);
     // -----------------------------
 
     // ----------------------------------------------------------------------
-    // --- VALIDACIÓN Y REDIRECCIÓN INICIAL (MODIFICADO) ---
+    // --- VALIDACIÓN Y REDIRECCIÓN INICIAL ---
     // ----------------------------------------------------------------------
     
     // 1. Prioridad: Falta información del Pasajero (LocalStorage) -> Ir a Registro
@@ -149,14 +157,14 @@ const ReservationPage = () => {
         </div>
       </Layout>
     );
-  }
+    }
 
     // 2. Segunda Prioridad: Falta información del Viaje (URL) -> Ir a Búsqueda
     if (isViajeDataMissing) {
         return <Layout_Auth title="Error" subtitle="Datos de viaje incompletos">
             <div className="text-center py-20 space-y-4">
                 <p className="text-xl font-bold text-red-600"> No se pudo cargar el viaje.</p>
-                <p className="text-sm text-muted-foreground">Por favor, vuelve a la búsqueda y selecciona un viaje válido.</p>
+                <p className="text-sm text-muted-foreground">Por favor, vuelva a la búsqueda y selecciona un viaje válido.</p>
                 <Button 
                     onClick={() => navigate('/search')} 
                     variant="link" 
@@ -174,7 +182,7 @@ const ReservationPage = () => {
     if (reservationResult && reservationResult.success && reservationResult.reserva) {
         const reserva = reservationResult.reserva;
         
-        // **IMPORTANTE: Usamos la fecha del viaje de la URL para el display del viaje**
+        // Se utiliza la fecha del viaje de la URL para el display.
         const displayedViaje: Viaje = {
             ...viaje,
             horaLlegada: reserva.viaje?.horaLlegada || viaje.horaLlegada // Usar horaLlegada del resultado si está disponible
@@ -253,14 +261,15 @@ const ReservationPage = () => {
         );
     }
 
-    // --- Lógica de Manejo de Asientos y Pasajeros Adicionales (sin cambios) ---
+    // --- Lógica de Manejo de Asientos y Pasajeros Adicionales ---
+    // Función para manejar el incremento/decremento de asientos.
     const handleSetAsientos = (newCount: number) => {
         if (newCount < 1) return;
         if (newCount > viaje.cuposDisponibles) return;
 
         setAsientos(newCount);
         
-        // Ajustar el array de pasajeros adicionales
+        // Ajustar el array de pasajeros adicionales al número de asientos - 1.
         const additionalCount = newCount - 1;
         setPasajerosAdicionales(prev => {
             if (prev.length < additionalCount) {
@@ -274,6 +283,7 @@ const ReservationPage = () => {
         setErrors({});
     };
 
+    // Función para actualizar los datos de un pasajero adicional.
     const handlePassengerChange = (index: number, field: keyof Pasajero, value: string) => {
         setPasajerosAdicionales(prev => {
             const updated = [...prev];
@@ -283,6 +293,7 @@ const ReservationPage = () => {
         setErrors({});
     };
 
+    // Valida que todos los campos de pasajeros estén completos.
     const validateForm = (): boolean => {
         const newErrors: Record<string, string> = {};
         
@@ -303,7 +314,8 @@ const ReservationPage = () => {
         return Object.keys(newErrors).length === 0;
     };
 
-    // --- LÓGICA DE PETICIÓN GRAPHQL MODIFICADA ---
+    // --- LÓGICA DE PETICIÓN GRAPHQL ---
+    // Función principal para enviar la solicitud de reserva al servidor GraphQL.
     const handleReservation = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -328,7 +340,7 @@ const ReservationPage = () => {
         if (!pasajeroId || isNaN(viajeIdInt)) {
             toast({
                 title: "Error de Datos",
-                description: `Falta el ID del pasajero (en localStorage) o el ID del viaje (${viaje.id}) es inválido.`,
+                description: "Falta el ID del pasajero o el ID del viaje es inválido.",
                 variant: "destructive",
             });
             return;
@@ -399,7 +411,7 @@ const ReservationPage = () => {
                 setReservationResult(resultData);
                 if (resultData.success) {
                     toast({
-                        title: "¡Reserva Exitosa! 🎉",
+                        title: "Reserva Exitosa",
                         description: `Tu reserva ${resultData.reserva.codigoReserva} ha sido confirmada.`,
                         variant: "default",
                     });
@@ -413,20 +425,21 @@ const ReservationPage = () => {
             } else if (jsonResponse.errors) {
                 // Manejar errores de GraphQL
                 const errorMsg = jsonResponse.errors.map((e: any) => e.message).join(' | ');
-                setReservationResult({ success: false, message: `Error GraphQL: ${errorMsg}` });
+                setReservationResult({ success: false, message: `Error en la solicitud: ${errorMsg}` });
                 toast({
                     title: "Error en el Servidor",
-                    description: `Ocurrió un error con la petición: ${errorMsg}`,
+                    description: "Ocurrió un error al procesar la solicitud.",
                     variant: "destructive",
                 });
             }
 
         } catch (error: any) {
             console.error("Error al realizar la reserva:", error);
-            setReservationResult({ success: false, message: `No se pudo conectar con el servidor: ${error.message}` });
+            // Mensaje de error modificado para no revelar detalles de la conexión
+            setReservationResult({ success: false, message: `No se pudo completar la reserva. Inténtalo de nuevo.` });
             toast({
                 title: "Error de Conexión",
-                description: "No se pudo comunicar con el servidor GraphQL en localhost:8080.",
+                description: "No se pudo comunicar con el servidor. Intenta de nuevo.",
                 variant: "destructive",
             });
         } finally {
@@ -519,7 +532,7 @@ const ReservationPage = () => {
                                 {/* Se ha ELIMINADO el input para el pasajeroId/Identificación del principal */}
                             </div>
 
-                            {/* Bloque: Pasajeros Adicionales (sin cambios) */}
+                            {/* Bloque: Pasajeros Adicionales */}
                             {asientos > 1 && (
                                 <>
                                     <h3 className="flex items-center gap-2 text-lg font-semibold border-b pb-2 pt-4 mb-4 text-bus-primary">
@@ -557,11 +570,11 @@ const ReservationPage = () => {
                                 </>
                             )}
                             
-                            {/* Política de Cancelación (sin cambios) */}
+                            {/* Política de Cancelación */}
                             <div className="flex items-start gap-2 p-3 text-sm bg-bus-info/10 border border-bus-info text-bus-info rounded-lg">
                                 <Info className="h-5 w-5 mt-0.5 flex-shrink-0" />
                                 <p className="font-medium">
-                                    Política de Cancelación: <span className="font-normal">Se permite cancelar hasta la hora de salida; no se cobran penalidades en este alcance.</span>
+                                    Política de Cancelación: <span className="font-normal">Se permite cancelar hasta la hora de salida sin ninguna penalidad.</span>
                                 </p>
                             </div>
 
