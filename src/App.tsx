@@ -14,6 +14,8 @@ import Reservar from "@/pages/Reservar";
 import ChangePassword from "./pages/ChangePassword";
 import BusTrackingPage from "./pages/BusTrackingPage";
 import { AuthProvider } from "./hooks/useAuth";
+import TermsAndConditions from "./pages/Terminos";
+import PrivacyPolicy from "./pages/Politicas";
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -26,6 +28,8 @@ const App = () => (
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/terminos" element={<TermsAndConditions />} />
+        <Route path="/politicas" element={<PrivacyPolicy />} />
         <Route path="/login" element={<Login />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/search" element={<Search />} />

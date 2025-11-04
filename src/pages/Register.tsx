@@ -497,7 +497,9 @@ const Register = () => {
                                     htmlFor="acceptTerms"
                                     className={`text-sm font-medium leading-none ${errors.acceptTerms ? "text-bus-danger" : "peer-disabled:cursor-not-allowed peer-disabled:opacity-70"}`}
                                 >
-                                    Acepto los <Link to="/terms" className="underline hover:text-primary">Términos</Link> y la <Link to="/privacy" className="underline hover:text-primary">Política de Privacidad</Link> *.
+                                    Acepto los <Link to="/terminos" className="underline hover:text-primary" target="_blank" 
+                                    rel="noopener noreferrer">Términos</Link> y la <Link to="/politicas" className="underline hover:text-primary" target="_blank" 
+                                    rel="noopener noreferrer">Política de Privacidad</Link>.
                                 </Label>
                             </div>
                             <ErrorMessage field="acceptTerms" />
