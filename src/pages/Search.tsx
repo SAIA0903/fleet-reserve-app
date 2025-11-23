@@ -9,8 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Link } from "react-router-dom";
-import Layout from "@/components/Layout";
+import Layout from "@/components/Layout"; // <--- Necesario para el fallback de "Acceso Requerido"
 import Layout_Auth from "@/components/Layout_Auth";
+// ************************************************
+// 1. IMPORTAR useAuth
+import { useAuth } from "@/hooks/useAuth"; 
+// ************************************************
 import {
   Search as SearchIcon,
   MapPin,
@@ -23,31 +27,28 @@ import {
   ChevronRight,
   Info,
   ListOrdered,
-  LogIn // <-- Ícono LogIn añadido
+  LogIn // <-- Ícono LogIn
 } from "lucide-react";
 // Importamos 'addDays' de date-fns para el ajuste de fecha
 import { format, parseISO, addDays } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
-// --- Configuración GraphQL ---
-// El endpoint se mantiene en el puerto 8080 local
+// --- Configuración GraphQL (Se mantiene) ---
 const GRAPHQL_ENDPOINT = 'http://localhost:8080/graphql';
 
-// 1. Definir la interfaz 'Viaje'
 interface Viaje {
   id: string;
   origen: string;
   destino: string;
   fecha: string;
   horaSalida: string;
-  horaLlegada: string; // Incluida para determinar el fin del viaje
+  horaLlegada: string;
   cuposTotales: number;
   cuposDisponibles: number;
   estado: string;
 }
 
-// 2. Definir la consulta de GraphQL parametrizada para buscar viajes
 const BUSCAR_VIAJES_QUERY = `
   query BuscarViajes($input: BuscarViajesInput!) {
     buscarViajes(input: $input) {
@@ -64,137 +65,87 @@ const BUSCAR_VIAJES_QUERY = `
   }
 `;
 
-// 3. Definir la consulta para obtener la lista de ciudades
 const BUSCAR_CIUDADES_QUERY_LIST = `
-  query {
-    buscarCiudades
-  }
+  query{buscarCiudades}
 `;
 
-// Constante para la paginación
 const ITEMS_PER_PAGE = 10;
 
-// Obtener credenciales de localStorage (accesibles a nivel de módulo)
-const token = localStorage.getItem('token');
-const pasajeroId = localStorage.getItem('pasajeroId');
+// (Se mantiene la lógica de Fechas y executeGraphQLQuery)
 
-// =========================================================================
-// --- Lógica de Fechas (MODIFICADA) ---
-// =========================================================================
+// ... [funciones getTripDateTime, isTripStarted, isTripEnded, executeGraphQLQuery se mantienen sin cambios] ...
 
-/**
- * Combina fecha (YYYY-MM-DD) y hora (HH:mm:ss) en un objeto Date,
- * forzando la interpretación en la zona horaria local del usuario para evitar desfases.
- * * @param dateStr La fecha del viaje (YYYY-MM-DD), que es la fecha de SALIDA.
- * @param timeStr La hora a establecer (HH:mm:ss).
- * @param isArrivalTime Indica si la hora es de llegada. Requiere 'timeOfDeparture' para el cálculo de cambio de día.
- * @param timeOfDeparture La hora de salida (HH:mm:ss), necesaria para determinar si la llegada es al día siguiente.
- */
+// Función auxiliar para combinar fecha y hora (MANTENIDA)
 const getTripDateTime = (dateStr: string, timeStr: string, isArrivalTime: boolean = false, timeOfDeparture: string | null = null): Date => {
-  // 1. Parseamos la fecha ISO YYYY-MM-DD.
   let tripDateTime = parseISO(dateStr);
-
-  // 2. Extraemos las horas, minutos y segundos de timeStr (ej: "15:30:00").
   const [hoursStr, minutesStr, secondsStr = '0'] = timeStr.split(':');
   const hours = parseInt(hoursStr, 10);
   const minutes = parseInt(minutesStr, 10);
   const seconds = parseInt(secondsStr, 10);
-
-  // 3. Establecemos la hora, minutos y segundos.
   tripDateTime.setHours(hours, minutes, seconds, 0);
-
-  // 4. Lógica de ajuste para la hora de llegada si es anterior a la hora de salida.
   if (isArrivalTime && timeOfDeparture) {
     const [depHoursStr, depMinutesStr] = timeOfDeparture.split(':');
     const depHours = parseInt(depHoursStr, 10);
     const depMinutes = parseInt(depMinutesStr, 10);
-
-    // Creamos un Date para la salida solo con la hora para comparar.
-    // Esto es puramente comparativo para el "día siguiente".
-    const departureTimeOnly = new Date(0); // Fecha arbitraria
+    const departureTimeOnly = new Date(0);
     departureTimeOnly.setHours(depHours, depMinutes);
-
-    // Creamos un Date para la llegada solo con la hora para comparar.
-    const arrivalTimeOnly = new Date(0); // Fecha arbitraria
+    const arrivalTimeOnly = new Date(0);
     arrivalTimeOnly.setHours(hours, minutes);
-
-    // Si la hora de llegada es estrictamente ANTES que la hora de salida,
-    // asumimos que el viaje termina al día siguiente.
     if (arrivalTimeOnly.getTime() < departureTimeOnly.getTime()) {
-      // Añadimos un día a la fecha, que inicialmente es la fecha de salida.
       tripDateTime = addDays(tripDateTime, 1);
     }
   }
-
   return tripDateTime;
 };
 
-/**
- * Determina si el viaje ya ha iniciado (la hora de salida es en el pasado).
- */
+// Función auxiliar para viaje iniciado (MANTENIDA)
 const isTripStarted = (dateStr: string, timeStr: string): boolean => {
-  const tripDateTime = getTripDateTime(dateStr, timeStr, false); // Es hora de salida
+  const tripDateTime = getTripDateTime(dateStr, timeStr, false);
   const now = new Date();
   return now > tripDateTime;
 };
 
-/**
- * Determina si el viaje ya finalizó (la hora de llegada es en el pasado),
- * considerando el posible cambio de día.
- * * @param dateStr Fecha de salida.
- * @param arrivalTimeStr Hora de llegada.
- * @param departureTimeStr Hora de salida.
- */
+// Función auxiliar para viaje finalizado (MANTENIDA)
 const isTripEnded = (dateStr: string, arrivalTimeStr: string, departureTimeStr: string): boolean => {
-    // Usamos la lógica de getTripDateTime para calcular la hora de llegada correcta (con o sin día extra)
     const tripEndDateTime = getTripDateTime(dateStr, arrivalTimeStr, true, departureTimeStr);
     const now = new Date();
     return now > tripEndDateTime;
 };
-// =========================================================================
-// --- FIN Lógica de Fechas (MODIFICADA) ---
-// =========================================================================
 
-// --- Función de Petición GraphQL (Se mantiene igual) ---
+// Función auxiliar para GraphQL (MANTENIDA)
 async function executeGraphQLQuery(query: string, variables: any = {}): Promise<any> {
-  const maxRetries = 3;
-  let attempt = 0;
-
-  while (attempt < maxRetries) {
-    try {
-      const response = await fetch(GRAPHQL_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: query,
-          variables: variables,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (result.errors) {
-        throw new Error(result.errors[0]?.message || 'Error desconocido en GraphQL');
+    const maxRetries = 3;
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      try {
+        const response = await fetch(GRAPHQL_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: query,
+            variables: variables,
+          }),
+        });
+        const result = await response.json();
+        if (result.errors) {
+          throw new Error(result.errors[0]?.message || 'Error desconocido en GraphQL');
+        }
+        if (!response.ok) {
+          throw new Error(`Error HTTP: ${response.status} ${response.statusText}`);
+        }
+        return result.data;
+      } catch (error) {
+        if (attempt === maxRetries - 1) {
+          throw error;
+        }
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        attempt++;
       }
-
-      if (!response.ok) {
-        throw new Error(`Error HTTP: ${response.status} ${response.statusText}`);
-      }
-
-      return result.data;
-
-    } catch (error) {
-      if (attempt === maxRetries - 1) {
-        throw error; // Lanzar el error final
-      }
-      const delay = Math.pow(2, attempt) * 1000;
-      await new Promise(resolve => setTimeout(resolve, delay));
-      attempt++;
     }
-  }
-  throw new Error("Fallo la petición después de múltiples reintentos.");
+    throw new Error("Fallo la petición después de múltiples reintentos.");
 }
 
 // Componente principal
@@ -202,11 +153,102 @@ const Search = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  // ************************************************
+  // MODIFICACIÓN 2: Usar useAuth para el estado de autenticación.
+  // Obtenemos isAuthenticated y isAuthReady
+  const { isAuthenticated, isAuthReady } = useAuth();
+  // ELIMINADO: const [pasajeroId, setPasajeroId] = useState<string | null>(() => localStorage.getItem('pasajeroId'));
+  // ELIMINADO: useEffect para sincronizar pasajeroId
+  // ************************************************
+
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const [isCitiesLoading, setIsCitiesLoading] = useState(true);
 
-  // --- AÑADIDO: Verificación de Sesión (Se mantiene igual) ---
-  if (!pasajeroId) {
+  // 3. Estados de Búsqueda y Paginación
+  const [searchData, setSearchData] = useState({
+    origin: "",
+    destination: "",
+    date: undefined as Date | undefined
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [results, setResults] = useState<Viaje[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [isDatePopoverOpen, setIsDatePopoverOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+    
+  // --- Lógica de Carga de Ciudades (Se mantiene y se liga a isAuthReady) ---
+  const fetchCities = async () => {
+    // Si la autenticación no ha terminado de rehidratarse, salimos.
+    if (!isAuthReady) return; 
+
+    setIsCitiesLoading(true);
+    try {
+      const data = await executeGraphQLQuery(BUSCAR_CIUDADES_QUERY_LIST);
+      const fetchedCities: string[] = data?.buscarCiudades || [];
+        
+      sessionStorage.setItem('cities', JSON.stringify(fetchedCities));
+      setAvailableCities(fetchedCities);
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Error de red o servidor desconocido.";
+      console.error("Error fetching cities:", error);
+      toast({
+        title: "Error de conexión",
+        description: `No se pudieron cargar las ciudades disponibles. ${message}`,
+        variant: "destructive",
+      });
+      setAvailableCities([]);
+    } finally {
+      setIsCitiesLoading(false);
+    }
+  };
+  
+  // MODIFICACIÓN 3: Cargar ciudades solo cuando la autenticación esté lista.
+  useEffect(() => {
+    if (!isAuthReady) return; // Esperar a que la autenticación esté lista
+
+    // Si no está autenticado, no cargamos nada. El bloque de renderizado mostrará el mensaje de login.
+    if (!isAuthenticated) {
+        setIsCitiesLoading(false); // Detenemos el spinner si no vamos a cargar
+        setAvailableCities([]);
+        return; 
+    }
+
+    const cachedCities = sessionStorage.getItem('cities');
+      
+    if (cachedCities) {
+      try {
+        const parsedCities: string[] = JSON.parse(cachedCities);
+        setAvailableCities(parsedCities);
+        setIsCitiesLoading(false);
+      } catch (e) {
+        console.error("Error parsing cached cities, refetching:", e);
+        sessionStorage.removeItem('cities');
+        fetchCities(); // Intentar cargar de nuevo si hay error de parsing
+      }
+    } else {
+      fetchCities();
+    }
+  }, [isAuthReady, isAuthenticated]); // Depende de que la autenticación esté lista y del estado.
+  
+
+  // ************************************************
+  // MODIFICACIÓN 4: Bloqueo de página hasta que isAuthReady sea true.
+  // Esto es crucial para evitar un "parpadeo" mientras se lee el almacenamiento.
+  if (!isAuthReady) {
+    // Puedes renderizar un spinner o null mientras se carga el estado de autenticación.
+    // Usaremos un simple mensaje para fines de ejemplo, o simplemente `null` para no renderizar nada.
+    return (
+        <Layout title="Cargando..." subtitle="Verificando sesión">
+            <div className="text-center py-20 text-muted-foreground">Cargando datos de sesión...</div>
+        </Layout>
+    );
+  }
+
+  // MODIFICACIÓN 5: Verificación de Sesión utilizando isAuthenticated.
+  if (!isAuthenticated) {
+    // Usamos el Layout no-Auth para mostrar el mensaje de "Acceso Requerido".
     return (
       <Layout title="FleetGuard360" subtitle="Búsqueda de Viajes">
         <div className="max-w-xl mx-auto text-center py-20 bg-white shadow-lg rounded-xl p-8">
@@ -226,67 +268,8 @@ const Search = () => {
       </Layout>
     );
   }
-  // --- FIN AÑADIDO ---
+  // ************************************************
 
-  // --- Lógica de Carga de Ciudades (Se mantiene igual) ---
-  const fetchCities = async () => {
-    setIsCitiesLoading(true);
-    try {
-      const data = await executeGraphQLQuery(BUSCAR_CIUDADES_QUERY_LIST);
-      const fetchedCities: string[] = data?.buscarCiudades || [];
-      
-      sessionStorage.setItem('cities', JSON.stringify(fetchedCities));
-      setAvailableCities(fetchedCities);
-
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Error de red o servidor desconocido.";
-      console.error("Error fetching cities:", error);
-      toast({
-        title: "Error de conexión",
-        description: `No se pudieron cargar las ciudades disponibles. ${message}`,
-        variant: "destructive",
-      });
-      setAvailableCities([]);
-    } finally {
-      setIsCitiesLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    const cachedCities = sessionStorage.getItem('cities');
-    
-    if (cachedCities) {
-      try {
-        const parsedCities: string[] = JSON.parse(cachedCities);
-        setAvailableCities(parsedCities);
-        setIsCitiesLoading(false);
-      } catch (e) {
-        console.error("Error parsing cached cities, refetching:", e);
-        sessionStorage.removeItem('cities');
-        fetchCities();
-      }
-    } else {
-      fetchCities();
-    }
-  }, []);
-  // --- FIN Lógica de Carga de Ciudades ---
-
-
-  const [searchData, setSearchData] = useState({
-    origin: "",
-    destination: "",
-    date: undefined as Date | undefined
-  });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const [results, setResults] = useState<Viaje[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
-
-  const [isDatePopoverOpen, setIsDatePopoverOpen] = useState(false);
-
-  const [currentPage, setCurrentPage] = useState(1);
-  
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -303,6 +286,7 @@ const Search = () => {
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    // No es necesario verificar isAuthenticated aquí, ya que el componente no se renderizaría si no lo estuviera.
     if (!validateForm()) return;
 
     setIsLoading(true);
@@ -310,6 +294,7 @@ const Search = () => {
     setResults([]);
     setCurrentPage(1);
 
+    // ... (Lógica de búsqueda de viajes) ...
     try {
       const fechaISO = format(searchData.date!, "yyyy-MM-dd");
 
@@ -375,11 +360,14 @@ const Search = () => {
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentResults = results.slice(startIndex, endIndex);
 
-  // --- Renderizado Condicional de Vistas ---
+  // --- Renderizado de la UI de Búsqueda ---
   const layoutTitle = 'Búsqueda de Reservas';
-  
+    
   return (
+    // ************************************************
+    // MODIFICACIÓN 6: Uso de Layout_Auth como contenedor principal.
     <Layout_Auth title="FleetGuard360" subtitle={layoutTitle}>
+    {/* ************************************************ */}
       <div className="max-w-6xl mx-auto space-y-8">
 
         {/* Botón para Mis Reservas */}
@@ -536,7 +524,7 @@ const Search = () => {
           </CardContent>
         </Card>
 
-        {/* Results Section */}
+        {/* Results Section (Se mantiene igual) */}
         {hasSearched && (
           <Card className="shadow-card bg-background/50 border-0">
             <CardHeader>
@@ -572,14 +560,11 @@ const Search = () => {
                   {currentResults.map((viaje) => {
                     // --- LÓGICA DE ESTADO EN CURSO (AJUSTADA) ---
                     const started = isTripStarted(viaje.fecha, viaje.horaSalida);
-                    // Uso de la función mejorada:
                     const ended = isTripEnded(viaje.fecha, viaje.horaLlegada, viaje.horaSalida);
-                    const isRunning = started && !ended; // El viaje está en recorrido si ha empezado pero no ha terminado.
+                    const isRunning = started && !ended; 
 
                     const isAvailable = viaje.cuposDisponibles > 0;
                     
-                    // Condición ACTUALIZADA: Deshabilitado si ya terminó (ended) O no tiene cupos (!isAvailable).
-                    // Los viajes en curso (isRunning) SÍ están habilitados si isAvailable es true.
                     const isDisabled = ended || !isAvailable; 
                     
                     let buttonText = "Reservar";
@@ -592,11 +577,9 @@ const Search = () => {
                       buttonText = "Transcurrido";
                       statusText = "Finalizado";
                     } else if (isRunning) {
-                      // Viaje en curso: Se permite reservar si hay cupos (isAvailable).
                       buttonText = "Reservar";
                       statusText = "En Curso";
                     } else {
-                        // Viaje futuro normal (isAvailable sigue siendo la fuente principal)
                         statusText = getAvailabilityText(viaje.cuposDisponibles, viaje.cuposTotales, isRunning, ended);
                     }
                     // --- FIN LÓGICA DE ESTADO EN CURSO ---
@@ -614,7 +597,6 @@ const Search = () => {
                                 <Badge
                                   className={cn(
                                     "text-white border-0",
-                                    // Pasamos los nuevos estados para colores más precisos
                                     getAvailabilityColor(viaje.cuposDisponibles, viaje.cuposTotales, isRunning, ended)
                                   )}
                                 >
@@ -650,7 +632,7 @@ const Search = () => {
                               <p className="text-sm text-muted-foreground">Hasta: {viaje.destino}</p>
                             </div>
 
-                            {/* Reserve Button (AJUSTADO para usar 'isDisabled' y 'buttonText' actualizados) */}
+                            {/* Reserve Button (Se mantiene igual) */}
                             <div className="text-right">
                               {isDisabled ? (
                                 <Button

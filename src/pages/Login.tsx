@@ -9,13 +9,14 @@ import { useToast } from "@/hooks/use-toast";
 import Layout from "../components/Layout"; 
 import { LogIn, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // URL del endpoint GraphQL de Spring Boot
 const GRAPHQL_ENDPOINT = "http://localhost:8080/graphql";
 
 // Componente principal de la página de inicio de sesión.
 const Login = () => {
-    // Estado para capturar el nombre de usuario y la contraseña.
+    // ... (Estados formData, errors, isLoading)
     const [formData, setFormData] = useState({
         username: "",
         password: ""
@@ -23,12 +24,15 @@ const Login = () => {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [isLoading, setIsLoading] = useState(false);
     
-    // Hooks para notificaciones, navegación y contexto de autenticación.
+    // 🛑 NUEVO ESTADO: Controla el checkbox de "Recordarme"
+    const [rememberMe, setRememberMe] = useState(false); 
+
+    // ... (Hooks useToast, useNavigate, useAuth)
     const { toast } = useToast();
     const navigate = useNavigate();
     const { setAuthData } = useAuth();
-
-    // Función para validar que los campos de usuario y contraseña no estén vacíos.
+    
+    // ... (Función validateForm)
     const validateForm = () => {
         const newErrors: Record<string, string> = {};
 
@@ -43,10 +47,12 @@ const Login = () => {
         return Object.keys(newErrors).length === 0;
     };
 
+
     // Manejador de envío del formulario para iniciar sesión.
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
+
+        // ... (Validación y setIsLoading(true))
         if (!validateForm()) {
             toast({
                 title: "Campos incompletos",
@@ -57,82 +63,85 @@ const Login = () => {
         }
 
         setIsLoading(true);
-        
+
         const { username, password } = formData;
-        
-        // Mutación GraphQL para el inicio de sesión.
+
+        // ... (Mutación GraphQL)
         const loginMutation = `
-            mutation LoginPasajero {
-                login(input: { 
-                    username: "${username}", 
-                    password: "${password}" 
-                }) {
-                    success
-                    message
-                    token
-                    pasajero {id nombre apellido}
-                }
-            }
-        `;
+             mutation LoginPasajero {
+                 login(input: { 
+                     username: "${username}", 
+                     password: "${password}" 
+                 }) {
+                     success
+                     message
+                     token
+                     pasajero {id nombre apellido}
+                 }
+             }
+         `;
 
         try {
-            // Realiza la petición POST al endpoint de GraphQL.
+            // ... (Petición fetch)
             const response = await fetch(GRAPHQL_ENDPOINT, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ query: loginMutation }),
+                 method: 'POST',
+                 headers: {
+                     'Content-Type': 'application/json',
+                 },
+                 body: JSON.stringify({ query: loginMutation }),
             });
-            
+
             const result = await response.json();
-            
-            // Manejo de errores a nivel de red, servidor o protocolo GraphQL.
+
+            // ... (Manejo de errores de red/servidor)
             if (!response.ok || result.errors) {
-                // Se simplifica el mensaje de error para el usuario final.
-                const errorMessage = "No se pudo acceder al servicio. Por favor, revisa tus datos e intenta de nuevo.";
-                
-                toast({
-                    title: "Error de Acceso",
-                    description: errorMessage,
-                    variant: "destructive",
-                });
-                return;
+                 const errorMessage = "No se pudo acceder al servicio. Por favor, revisa tus datos e intenta de nuevo.";
+
+                 toast({
+                     title: "Error de Acceso",
+                     description: errorMessage,
+                     variant: "destructive",
+                 });
+                 return;
             }
-            
+
             const loginData = result.data.login;
-            
+
             // Proceso de inicio de sesión exitoso.
             if (loginData.success && loginData.token && loginData.pasajero) {
-                // Almacena los datos de autenticación localmente.
-                localStorage.setItem('authToken', loginData.token);
-                localStorage.setItem('pasajeroId',loginData.pasajero.id)
-                localStorage.setItem('pasajeroNombre',loginData.pasajero.nombre)
-                localStorage.setItem('pasajeroApellido',loginData.pasajero.apellido)
-                setAuthData(loginData.token, loginData.pasajero);
                 
+                // 🛑 AJUSTE CRÍTICO: LLAMAR A setAuthData CON EL VALOR DE rememberMe
+                setAuthData(loginData.token, loginData.pasajero, rememberMe); 
+                
+                // ⚠️ NOTA: Eliminar las líneas de `localStorage.setItem` manuales 
+                // ya que ahora `setAuthData` se encarga de elegir el storage correcto.
+                // localStorage.setItem('authToken', loginData.token); // ELIMINAR O COMENTAR
+                // localStorage.setItem('pasajeroId',loginData.pasajero.id) // ELIMINAR O COMENTAR
+                // localStorage.setItem('pasajeroNombre',loginData.pasajero.nombre) // ELIMINAR O COMENTAR
+                // localStorage.setItem('pasajeroApellido',loginData.pasajero.apellido) // ELIMINAR O COMENTAR
+
                 toast({
                     title: "Inicio de sesión exitoso",
                     description: loginData.message || "Bienvenido.",
                 });
-                
+
                 // Redirige al usuario a la página de búsqueda.
                 navigate("/search");
             } else {
-                // Manejo de error de credenciales incorrectas (validación del backend).
-                toast({
-                    title: "Error de Autenticación",
-                    description: loginData.message || "Credenciales incorrectas o usuario no encontrado.",
-                    variant: "destructive",
-                });
+                 // ... (Manejo de error de credenciales incorrectas)
+                 toast({
+                     title: "Error de Autenticación",
+                     description: loginData.message || "Credenciales incorrectas o usuario no encontrado.",
+                     variant: "destructive",
+                 });
             }
-            
+
         } catch (error) {
-            // Manejo de error de conexión fallida (ej: backend apagado).
+            // ... (Manejo de error de conexión)
             console.error("Error al conectar con la API:", error);
             toast({
                 title: "Error de Conexión",
-                description: "No se pudo conectar con el servidor. Por favor, intenta más tarde.", // Mensaje simplificado.
+                description: "No se pudo conectar con el servidor. Por favor, intenta más tarde.",
                 variant: "destructive",
             });
         } finally {
@@ -140,7 +149,7 @@ const Login = () => {
         }
     };
 
-    // Actualiza el estado del formulario y limpia el mensaje de error al escribir.
+    // ... (Función handleInputChange)
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
         
@@ -148,11 +157,13 @@ const Login = () => {
             setErrors(prev => ({ ...prev, [field]: "" }));
         }
     };
-
+    
+    // ... (JSX del componente Login)
     return (
         <Layout title="FleetGuard360" subtitle="Inicio de Sesión">
             <div className="max-w-md mx-auto">
                 <Card className="shadow-elegant bg-gradient-card border-0">
+                    {/* ... (CardHeader) */}
                     <CardHeader className="space-y-4 text-center">
                         <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit">
                             <LogIn className="h-8 w-8 text-bus-primary" />
@@ -162,10 +173,11 @@ const Login = () => {
                             Ingresa tus credenciales para acceder a tu cuenta
                         </CardDescription>
                     </CardHeader>
+                    
                     <CardContent>
                         <form onSubmit={handleSubmit} className="space-y-6" noValidate>
                             
-                            {/* Campo de Nombre de Usuario */}
+                            {/* Campo de Nombre de Usuario (sin cambios) */}
                             <div className="space-y-2">
                                 <Label htmlFor="username">Nombre de Usuario</Label>
                                 <Input
@@ -187,7 +199,7 @@ const Login = () => {
                                 </div>
                             </div>
 
-                            {/* Campo de Contraseña */}
+                            {/* Campo de Contraseña (sin cambios) */}
                             <div className="space-y-2">
                                 <Label htmlFor="password">Contraseña</Label>
                                 <Input
@@ -209,6 +221,25 @@ const Login = () => {
                                 </div>
                             </div>
 
+                            {/* 🛑 NUEVA OPCIÓN: CHECKBOX DE "RECORDARME" */}
+                            <div className="flex items-center space-x-2">
+                                <Checkbox
+                                id="rememberMe"
+                                checked={rememberMe}
+                                onCheckedChange={(checked) => {
+                                    // Aseguramos que solo pasamos 'boolean' a setRememberMe
+                                    const isChecked = typeof checked === 'boolean' ? checked : false;
+                                    setRememberMe(isChecked);
+                                }}
+                            />
+                                <label
+                                    htmlFor="rememberMe"
+                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                >
+                                    Recordarme
+                                </label>
+                            </div>
+
                             <Button
                                 type="submit"
                                 className="w-full bg-accent hover:bg-accent-hover text-accent-foreground shadow-button transition-smooth"
@@ -217,7 +248,8 @@ const Login = () => {
                                 {isLoading ? "Iniciando Sesión..." : "Iniciar Sesión"}
                             </Button>
                         </form>
-
+                        
+                        {/* ... (Div de enlaces y botón de volver) */}
                         <div className="mt-6 text-center space-y-4">
                             <Link 
                                 to="/reset-password" 
@@ -225,14 +257,14 @@ const Login = () => {
                             >
                                 ¿Olvidaste tu contraseña?
                             </Link>
-                            
+
                             <p className="text-sm text-muted-foreground">
                                 ¿No tienes cuenta?{" "}
                                 <Link to="/register" className="text-primary hover:text-primary-hover font-medium transition-smooth">
                                     Registrarse
                                 </Link>
                             </p>
-                            
+
                             <Button variant="ghost" asChild className="text-muted-foreground">
                                 <Link to="/search" className="flex items-center gap-2">
                                     <ArrowLeft className="h-4 w-4" />

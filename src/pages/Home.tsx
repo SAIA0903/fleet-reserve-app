@@ -2,9 +2,30 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Bus, Shield, Clock, MapPin } from "lucide-react";
 import { Link } from "react-router-dom";
-import Layout from "@/components/Layout";
+import Layout from "@/components/Layout_Auth";
+// Importamos useAuth desde la nueva ubicación del contexto
+import { useAuth } from "@/hooks/useAuth"; 
+
 
 const Home = () => {
+  // 1. 🎯 CONSUMIR EL ESTADO GLOBAL DE AUTENTICACIÓN
+  const { isAuthenticated, isAuthReady } = useAuth(); 
+
+  // 2. ⏳ GESTIÓN DEL ESTADO DE CARGA CENTRALIZADA
+  if (!isAuthReady) {
+    return (
+      <Layout title="Cargando..." subtitle="Preparando la experiencia de usuario.">
+        <div className="flex justify-center items-center h-48">
+          <p>Cargando información de sesión...</p>
+        </div>
+      </Layout>
+    );
+  }
+
+  // 3. 💡 LÓGICA DE NAVEGACIÓN LIMPIA (No se utiliza directamente en el JSX, pero se mantiene la lógica)
+  // const boton = isAuthenticated ? 'search' : 'login';
+  // const botonTexto = isAuthenticated ? 'Buscar viajes' : 'Iniciar Sesión';
+  
   return (
     <Layout title="FleetGuard360" subtitle="Sistema de Reservas de Tiquetes de Bus">
       <div className="max-w-6xl mx-auto space-y-12">
@@ -20,26 +41,46 @@ const Home = () => {
             </p>
           </div>
           
+          {/* 4. 🚀 LÓGICA CONDICIONAL DE BOTONES APLICADA AQUÍ */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Button 
-              asChild 
-              size="lg" 
-              className="bg-accent hover:bg-accent-hover text-accent-foreground shadow-button transition-smooth px-8 py-6 text-lg"
-            >
-              <Link to="/login">
-                Iniciar Sesión
-              </Link>
-            </Button>
-            <Button 
-              asChild 
-              variant="outline" 
-              size="lg"
-              className="border-2 border-primary text-primary hover:bg-primary hover:text-primary-foreground transition-smooth px-8 py-6 text-lg"
-            >
-              <Link to="/register">
-                Registrarse
-              </Link>
-            </Button>
+            
+            {isAuthenticated ? (
+                // 🚀 ESCENARIO 1: USUARIO AUTENTICADO (Sólo botón de Búsqueda)
+                <Button 
+                  asChild 
+                  size="lg" 
+                  className="bg-accent hover:bg-accent-hover text-accent-foreground shadow-button transition-smooth px-8 py-6 text-lg"
+                >
+                  <Link to="/search">
+                    Buscar Viajes
+                  </Link>
+                </Button>
+            ) : (
+                // 🚀 ESCENARIO 2: USUARIO NO AUTENTICADO (Iniciar Sesión y Registrarse)
+                <>
+                  <Button 
+                    asChild 
+                    size="lg" 
+                    className="bg-accent hover:bg-accent-hover text-accent-foreground shadow-button transition-smooth px-8 py-6 text-lg"
+                  >
+                    <Link to="/login">
+                      Iniciar Sesión
+                    </Link>
+                  </Button>
+                  
+                  <Button 
+                    asChild 
+                    variant="outline" 
+                    size="lg"
+                    className="border-2 border-primary text-primary hover:bg-primary hover:text-primary-foreground transition-smooth px-8 py-6 text-lg"
+                  >
+                    <Link to="/register">
+                      Registrarse
+                    </Link>
+                  </Button>
+                </>
+            )}
+            
           </div>
         </section>
 
@@ -116,5 +157,4 @@ const Home = () => {
     </Layout>
   );
 };
-
 export default Home;

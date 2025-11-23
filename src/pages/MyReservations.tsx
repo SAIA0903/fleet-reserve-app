@@ -5,11 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate, Link } from "react-router-dom";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import Layout from "@/components/Layout";
 import Layout_Auth from "@/components/Layout_Auth";
+import { useAuth } from "@/hooks/useAuth";
 import {
     MapPin,
     Calendar as CalendarIcon,
@@ -26,76 +27,106 @@ import {
     Check,
     Plane, 
     LogIn,
-    Info 
+    Info, 
+    Send,
+    Star,
+    Bus
 } from "lucide-react";
 import { format, parseISO, addDays } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
+
 // --- Configuración GraphQL y Funciones Comunes ---
 const GRAPHQL_ENDPOINT = 'http://localhost:8080/graphql';
-const ITEMS_PER_PAGE = 5; 
-const getPasajeroId = () => localStorage.getItem('pasajeroId');
+const ITEMS_PER_PAGE = 5;
+const getStorage = () => {
+    // El AuthProvider garantiza que 'authStorageType' se guarda en localStorage, 
+    // independientemente de dónde se guarde la sesión.
+    const storageType = localStorage.getItem('authStorageType');
+    return storageType === 'local' ? localStorage : sessionStorage;
+};
 
-// Función genérica para ejecutar peticiones GraphQL.
-// Intenta enviar una consulta o mutación a un endpoint GraphQL predefinido.
-// Incluye una lógica básica de reintento en caso de fallos temporales.
+// Función genérica para obtener el Pasajero ID (Refactorizada)
+const getPasajeroId = () => getStorage().getItem('pasajeroData') 
+    ? JSON.parse(getStorage().getItem('pasajeroData')!).id // Obtiene el ID del objeto 'pasajeroData'
+    : null; // Devuelve null si no hay datos.
+
+// Función genérica para ejecutar peticiones GraphQL (Refactorizada)
+// Esta función ahora usa 'getStorage()' en lugar de asumir 'localStorage'
+const getAuthToken = () => getStorage().getItem('authToken');
+
 async function executeGraphQLQuery(query: string, variables: any = {}): Promise<any> {
-    // Número máximo de intentos antes de fallar.
     const maxRetries = 3;
     let attempt = 0;
     
-    // Bucle para intentar la petición hasta que sea exitosa o se agoten los reintentos.
+    // Obtener el token ANTES de intentar la petición
+    const token = getAuthToken(); 
+    
     while (attempt < maxRetries) {
         try {
-            // Realiza la petición POST al endpoint de GraphQL.
+            // Definir los encabezados, incluyendo el de autorización si hay un token.
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+            };
+
+            if (token) {
+                // Incluir el token en el encabezado Authorization
+                headers['Authorization'] = `Bearer ${token}`; 
+            }
+            
             const response = await fetch(GRAPHQL_ENDPOINT, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: headers, // Usar los encabezados definidos
                 body: JSON.stringify({
                     query: query,
                     variables: variables,
                 }),
             });
 
-            // Parsea la respuesta como JSON.
             const result = await response.json();
 
-            // Lanza un error si la respuesta de GraphQL contiene errores (errores a nivel de negocio o sintaxis).
             if (result.errors) {
-                // Mensaje simplificado para el usuario final.
                 throw new Error(result.errors[0]?.message || 'Ha ocurrido un error al procesar la solicitud.');
             }
 
-            // Lanza un error si la respuesta HTTP no fue exitosa (código 4xx o 5xx).
             if (!response.ok) {
-                // Mensaje simplificado sin detalles de código HTTP.
                 throw new Error('El servidor respondió con un error. Intenta de nuevo.');
             }
             
-            // Retorna los datos si la petición fue exitosa.
             return result.data;
         } catch (error) {
-            // Si es el último intento, lanza el error capturado.
             if (attempt === maxRetries - 1) {
                 throw error;
             }
             
-            // Calcula el tiempo de espera (backoff exponencial: 1s, 2s, 4s).
             const delay = Math.pow(2, attempt) * 1000;
-            
-            // Espera antes de reintentar.
             await new Promise(resolve => setTimeout(resolve, delay));
             attempt++;
         }
     }
-    // Lanza un error si todos los reintentos fallaron.
     throw new Error("No se pudo conectar al servicio. Por favor, revisa tu conexión a internet.");
 }
 
-// --- Consultas y Mutaciones GraphQL (horaLlegada AÑADIDA) ---
+// --- Consultas y Mutaciones GraphQL (Añadido: Verificar Encuesta y Responder Encuesta) ---
+
+// MUTACIÓN PARA RESPONDER LA ENCUESTA
+const RESPONDER_ENCUESTA_MUTATION = `
+    mutation ResponderEncuesta($input: ResponderEncuestaInput!) {
+        responderEncuesta(input: $input) {
+            success
+            mensaje
+        }
+    }
+`;
+
+// CONSULTA PARA VERIFICAR SI YA SE RESPONDIÓ LA ENCUESTA
+const YA_RESPONDIO_ENCUESTA_QUERY = `
+    query YaRespondioEncuesta($reservaId: ID!) {
+        yaRespondioEncuesta(reservaId: $reservaId)
+    }
+`;
+
 const GET_MY_RESERVATIONS_QUERY = `
     query GetMyReservations($pasajeroId: ID!) {
         misReservas(pasajeroId: $pasajeroId) {
@@ -138,7 +169,7 @@ const CANCEL_RESERVATION_MUTATION = `
     }
 `;
 
-// --- Interfaces de Datos (horaLlegada AÑADIDA) ---
+// --- Interfaces de Datos ---
 interface PasajeroAdicional {
     nombre: string;
 }
@@ -151,84 +182,72 @@ interface Reserva {
         horaSalida: string;
         origen: string;
         destino: string;
-        horaLlegada: string; // <--- AÑADIDO
+        horaLlegada: string;
     };
     cantidadAsientos: number;
     pasajerosAdicionales: PasajeroAdicional[];
     estado: string; // ACTIVA, CANCELADA (desde el backend)
+    // Campo para guardar el estado de la encuesta en el frontend
+    encuestaRespondida?: boolean; // Nuevo campo
 }
 
+interface CalificacionInput {
+    reservaId: number;
+    calificacionPuntualidad: number;
+    calificacionComodidad: number;
+    calificacionAtencionConductor: number;
+    calificacionPrestaciones: number;
+    calificacionGeneral: number;
+    comentarios: string;
+}
+
+
 // =========================================================================
-// --- Lógica de Fechas y Estados (AJUSTADA PARA EN CURSO) ---
+// --- Lógica de Fechas y Estados (Mantenida sin cambios) ---
 // =========================================================================
 
-/**
- * Combina fecha (YYYY-MM-DD) y hora (HH:mm) en un objeto Date,
- * ajustando para el cruce de medianoche si es la hora de llegada.
- */
+// ... (getTripDateTime, isTripStarted, isTripEnded, getFrontendStatus, getStatusBadge se mantienen igual) ...
+
 const getTripDateTime = (
     dateStr: string,
     timeStr: string,
     isArrival: boolean = false,
-    horaSalidaStr?: string // Necesaria si isArrival es true
+    horaSalidaStr?: string
 ): Date => {
-    let tripDateTime = parseISO(dateStr); // Inicializa con la fecha de SALIDA
-
+    let tripDateTime = parseISO(dateStr); 
     const [hoursStr, minutesStr] = timeStr.split(':');
     const hours = parseInt(hoursStr, 10);
     const minutes = parseInt(minutesStr, 10);
-
     tripDateTime.setHours(hours, minutes, 0, 0);
 
-    // Lógica para el cruce de medianoche:
-    // Aplica solo si estamos calculando la hora de LLEGADA y tenemos la hora de SALIDA
     if (isArrival && horaSalidaStr) {
         const [salidaHoursStr] = horaSalidaStr.split(':');
         const salidaHours = parseInt(salidaHoursStr, 10);
-        
-        // La llegada es el día siguiente si la hora de llegada (hours) es menor
-        // a la hora de salida (salidaHours).
-        // Ej: Salida 23:00, Llegada 05:00. 5 < 23 => +1 día.
-        if (hours < salidaHours) { 
-             // Se suma un día al objeto Date.
-             tripDateTime = addDays(tripDateTime, 1); 
+        if (hours < salidaHours) {  
+            tripDateTime = addDays(tripDateTime, 1); 
         }
     }
-    
     return tripDateTime;
 };
 
-/**
- * Determina si el viaje ya ha iniciado (la hora de salida es en el pasado).
- */
 const isTripStarted = (dateStr: string, timeStr: string): boolean => {
     const tripDateTime = getTripDateTime(dateStr, timeStr);
     const now = new Date();
     return now > tripDateTime;
 };
 
-/**
- * [ACTUALIZADA] Determina si el viaje ya finalizó (la hora de LLEGADA es en el pasado),
- * considerando el cruce de medianoche.
- */
 const isTripEnded = (fecha: string, horaSalida: string, horaLlegada: string): boolean => {
-    // Usamos 'isArrival: true' y pasamos la hora de salida para la lógica de cruce de medianoche
     const tripEndDateTime = getTripDateTime(fecha, horaLlegada, true, horaSalida); 
     const now = new Date();
     return now > tripEndDateTime;
 };
 
-/**
- * Determina el estado final de la reserva para el frontend.
- * @returns 'ACTIVA', 'CANCELADA', 'EN_CURSO', o 'FINALIZADA'
- */
 const getFrontendStatus = (estadoBackend: Reserva['estado'], fecha: string, horaSalida: string, horaLlegada: string): string => {
     if (estadoBackend === 'CANCELADA') {
         return 'CANCELADA';
     }
     
     const started = isTripStarted(fecha, horaSalida);
-    // [MODIFICADO] Pasar horaSalida a isTripEnded
     const ended = isTripEnded(fecha, horaSalida, horaLlegada); 
 
     if (ended) {
@@ -236,17 +255,12 @@ const getFrontendStatus = (estadoBackend: Reserva['estado'], fecha: string, hora
     }
 
     if (started && !ended) {
-        // Viaje iniciado, pero aún no terminado: ESTADO DE SEGUIMIENTO
         return 'EN_CURSO';
     }
 
-    // Activa y Futura (no ha iniciado)
     return 'ACTIVA';
 };
 
-/**
- * Devuelve la etiqueta Badge completa según el estado de frontend.
- */
 const getStatusBadge = (estadoBackend: Reserva['estado'], fecha: string, horaSalida: string, horaLlegada: string) => {
     
     const estadoFrontend = getFrontendStatus(estadoBackend, fecha, horaSalida, horaLlegada);
@@ -258,7 +272,6 @@ const getStatusBadge = (estadoBackend: Reserva['estado'], fecha: string, horaSal
         className = "bg-bus-success hover:bg-bus-success/80 text-white";
         text = "ACTIVA";
     } else if (estadoFrontend === 'EN_CURSO') {
-        // [NUEVO ESTADO EN CURSO]
         className = "bg-bus-warning hover:bg-bus-warning/80 text-white"; 
         text = "EN CURSO"; 
     } else if (estadoFrontend === 'FINALIZADA') {
@@ -277,13 +290,160 @@ const getStatusBadge = (estadoBackend: Reserva['estado'], fecha: string, horaSal
         </Badge>
     );
 };
+
 // =========================================================================
-// Componente: MyReservations
-// Muestra, gestiona y permite la cancelación de las reservas de un usuario.
+// --- Componente de Calificación (NUEVO) ---
+// =========================================================================
+
+interface CalificarServiceDialogProps {
+    reservaId: string;
+    onClose: () => void;
+    onSuccessfulSubmit: () => void;
+}
+
+const CalificarServiceDialog: React.FC<CalificarServiceDialogProps> = ({ reservaId, onClose, onSuccessfulSubmit }) => {
+    const { toast } = useToast();
+    const [isLoading, setIsLoading] = useState(false);
+    
+    // Estado inicial de las calificaciones (todos a 3 para facilitar la entrada)
+    const [calificaciones, setCalificaciones] = useState<Omit<CalificacionInput, 'reservaId'>>({
+        calificacionPuntualidad: 3,
+        calificacionComodidad: 3,
+        calificacionAtencionConductor: 3,
+        calificacionPrestaciones: 3,
+        calificacionGeneral: 3,
+        comentarios: "",
+    });
+
+    // Maneja el cambio de calificación para un campo específico (1 a 5)
+    const handleRatingChange = (field: keyof Omit<CalificacionInput, 'reservaId' | 'comentarios'>, value: number) => {
+        // Asegurar que sea un entero entre 1 y 5
+        const rating = Math.min(5, Math.max(1, Math.floor(value))); 
+        setCalificaciones(prev => ({
+            ...prev,
+            [field]: rating,
+        }));
+    };
+
+    // Maneja el envío de la calificación
+    const handleSubmitCalificacion = async () => {
+        setIsLoading(true);
+        try {
+            // Convertir el ID de la reserva a número (si GraphQL lo espera como Int/Long)
+            const reservaIdNum = parseInt(reservaId, 10);
+
+            // Preparar el objeto de entrada para la mutación
+            const input: CalificacionInput = {
+                reservaId: reservaIdNum,
+                calificacionPuntualidad: calificaciones.calificacionPuntualidad,
+                calificacionComodidad: calificaciones.calificacionComodidad,
+                calificacionAtencionConductor: calificaciones.calificacionAtencionConductor,
+                calificacionPrestaciones: calificaciones.calificacionPrestaciones,
+                calificacionGeneral: calificaciones.calificacionGeneral,
+                comentarios: calificaciones.comentarios.substring(0, 1000), // Límite de 1000 caracteres
+            };
+            
+            // Construir la mutación (usando variables es más limpio que construir el string con valores)
+            const variables = { input };
+            
+            const data = await executeGraphQLQuery(RESPONDER_ENCUESTA_MUTATION, variables);
+            
+            if (data && data.responderEncuesta.success) {
+                toast({
+                    title: "Calificación Enviada",
+                    description: data.responderEncuesta.mensaje || "Gracias por calificar nuestro servicio.",
+                });
+                onSuccessfulSubmit(); // Actualiza el estado de la reserva en el padre
+                onClose(); // Cierra el modal
+            } else {
+                throw new Error(data?.responderEncuesta?.mensaje || "Fallo al enviar la calificación.");
+            }
+
+        } catch (error) {
+            console.error("Error al calificar:", error);
+            toast({
+                title: "Error al calificar",
+                description: `Ocurrió un problema: ${error.message}`,
+                variant: "destructive",
+            });
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Componente de una fila de calificación con estrellas
+    const RatingRow: React.FC<{ label: string, field: keyof Omit<CalificacionInput, 'reservaId' | 'comentarios'>, value: number }> = 
+        ({ label, field, value }) => (
+        <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">{label}</Label>
+            <div className="flex space-x-1">
+                {[1, 2, 3, 4, 5].map((starValue) => (
+                    <Star
+                        key={starValue}
+                        className={cn(
+                            "h-5 w-5 cursor-pointer transition-colors",
+                            starValue <= value ? "text-yellow-500 fill-yellow-500" : "text-gray-300"
+                        )}
+                        onClick={() => handleRatingChange(field, starValue)}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+
+    return (
+        <Dialog open={true} onOpenChange={onClose}>
+            <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                    <DialogTitle>Calificar Servicio</DialogTitle>
+                    <p className="text-sm text-muted-foreground">Reserva #{reservaId}. Por favor califica del 1 (Malo) al 5 (Excelente).</p>
+                </DialogHeader>
+
+                <div className="grid gap-4 py-4">
+                    <RatingRow label="Puntualidad" field="calificacionPuntualidad" value={calificaciones.calificacionPuntualidad} />
+                    <RatingRow label="Comodidad" field="calificacionComodidad" value={calificaciones.calificacionComodidad} />
+                    <RatingRow label="Atención Conductor" field="calificacionAtencionConductor" value={calificaciones.calificacionAtencionConductor} />
+                    <RatingRow label="Prestaciones" field="calificacionPrestaciones" value={calificaciones.calificacionPrestaciones} />
+                    <RatingRow label="Calidad General" field="calificacionGeneral" value={calificaciones.calificacionGeneral} />
+
+                    <div className="space-y-2 pt-2">
+                        <Label htmlFor="comentarios">Comentarios (Máx. 1000 caracteres)</Label>
+                        <Textarea
+                            id="comentarios"
+                            placeholder="Comparte tu experiencia..."
+                            value={calificaciones.comentarios}
+                            onChange={(e) => setCalificaciones(prev => ({ ...prev, comentarios: e.target.value.substring(0, 1000) }))}
+                            maxLength={1000}
+                        />
+                        <p className="text-xs text-muted-foreground text-right">{calificaciones.comentarios.length}/1000</p>
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button 
+                        onClick={handleSubmitCalificacion} 
+                        disabled={isLoading}
+                        className="bg-bus-primary hover:bg-bus-primary/90 transition-smooth"
+                    >
+                        <Send className="h-4 w-4 mr-2" />
+                        {isLoading ? "Enviando..." : "Enviar Calificación"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+};
+
+
+// =========================================================================
+// Componente: MyReservations (AJUSTADO)
 // =========================================================================
 
 const MyReservations = () => {
-    // Hooks de la aplicación para notificaciones y navegación.
+    // Hook de autenticación:
+    const { isAuthenticated, pasajeroData, isAuthReady } = useAuth(); // <--- USO DE useAuth
+
+    // Hooks de la aplicación.
     const { toast } = useToast();
     const navigate = useNavigate();
 
@@ -294,46 +454,53 @@ const MyReservations = () => {
     const [selectedReservation, setSelectedReservation] = useState<Reserva | null>(null);
     const [cancelReason, setCancelReason] = useState("");
     const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+    
+    // NUEVOS ESTADOS para la calificación
+    const [isRatingDialogOpen, setIsRatingDialogOpen] = useState(false);
+    // ------------------------------------
 
     // Lógica de paginación.
     const [currentPage, setCurrentPage] = useState(1);
     const totalPages = Math.ceil(reservations.length / ITEMS_PER_PAGE);
-    const pasajeroId = getPasajeroId();
 
+    // Obtiene el ID del pasajero directamente del estado del hook
+    const pasajeroId = pasajeroData?.id; // <--- OBTENCIÓN DEL ID DESDE useAuth
 
-    // Manejo de Sesión: Redirige al login si no hay un ID de pasajero.
-    if (!pasajeroId) {
-        return (
-            <Layout title="FleetGuard360" subtitle="Mis Reservas">
-                <div className="max-w-xl mx-auto text-center py-20 bg-white shadow-lg rounded-xl p-8">
-                    <LogIn className="h-12 w-12 text-bus-primary mx-auto mb-4" />
-                    <h2 className="text-2xl font-bold mb-4">Acceso Requerido</h2>
-                    <p className="text-muted-foreground mb-6">
-                        Debe ingresar para ver el historial de sus reservas. <br></br>
-                        Por favor, inicie sesión.
-                    </p>
-                    <Button asChild className="bg-bus-primary hover:bg-bus-primary/90">
-                        <Link to="/login">
-                            <LogIn className="h-4 w-4 mr-2" />
-                            Ingresar
-                        </Link>
-                    </Button>
-                </div>
-            </Layout>
-        );
-    }
+    // Función para verificar el estado de la encuesta de una reserva (se mantiene igual)
+    const checkSurveyStatus = async (reserva: Reserva): Promise<boolean> => {
+        try {
+            const variables = { reservaId: parseInt(reserva.id, 10) };
+            const data = await executeGraphQLQuery(YA_RESPONDIO_ENCUESTA_QUERY, variables);
+            // El resultado esperado es { yaRespondioEncuesta: true/false }
+            return data?.yaRespondioEncuesta ?? false;
+        } catch (error) {
+            console.error(`Error al verificar encuesta para reserva ${reserva.id}:`, error);
+            // Asumir que NO se ha respondido si hay un error para evitar bloquear
+            return false; 
+        }
+    };
 
     // Lógica de Carga de Reservas: Consulta las reservas del usuario al servidor.
     const fetchMyReservations = async () => {
         setIsLoading(true);
         try {
             const variables = { pasajeroId: pasajeroId };
-            // Ejecuta la consulta GraphQL para obtener las reservas.
             const data = await executeGraphQLQuery(GET_MY_RESERVATIONS_QUERY, variables);
 
             if (data && data.misReservas) {
-                // Lógica de ordenamiento para mostrar reservas activas/futuras primero.
-                const sortedReservas = [...data.misReservas].sort((a: Reserva, b: Reserva) => {
+                // 1. Añadir el estado de la encuesta antes de ordenar
+                const reservasWithSurveyStatus = await Promise.all(data.misReservas.map(async (reserva: Reserva) => {
+                    const estadoFrontend = getFrontendStatus(reserva.estado, reserva.viaje.fecha, reserva.viaje.horaSalida, reserva.viaje.horaLlegada);
+                    // SOLO verificar si está FINALIZADA
+                    if (estadoFrontend === 'FINALIZADA') {
+                        const respondida = await checkSurveyStatus(reserva);
+                        return { ...reserva, encuestaRespondida: respondida };
+                    }
+                    return reserva;
+                }));
+
+                // 2. Lógica de ordenamiento (Mantenida sin cambios)
+                const sortedReservas = [...reservasWithSurveyStatus].sort((a: Reserva, b: Reserva) => {
                     const dateA = getTripDateTime(a.viaje.fecha, a.viaje.horaSalida);
                     const dateB = getTripDateTime(b.viaje.fecha, b.viaje.horaSalida);
                     
@@ -345,7 +512,7 @@ const MyReservations = () => {
                     if (statusA === 'EN_CURSO' && statusB !== 'EN_CURSO') return -1;
                     if (statusA !== 'EN_CURSO' && statusB === 'EN_CURSO') return 1;
 
-                    return dateB.getTime() - dateA.getTime(); // Orden cronológico inverso.
+                    return dateB.getTime() - dateA.getTime();
                 });
 
                 setReservations(sortedReservas);
@@ -361,11 +528,10 @@ const MyReservations = () => {
                 });
             }
         } catch (error) {
-            // Manejo de error con mensaje genérico para el usuario final.
             console.error("Error al cargar las reservas:", error);
             toast({
                 title: "Error al cargar las reservas",
-                description: `Ocurrió un problema al obtener tus reservas. Por favor, intenta de nuevo.`, // Mensaje simplificado.
+                description: `Ocurrió un problema al obtener tus reservas. Por favor, intenta de nuevo.`,
                 variant: "destructive",
             });
         } finally {
@@ -375,21 +541,25 @@ const MyReservations = () => {
 
     // Efecto para cargar las reservas al montar el componente o cambiar el pasajero.
     useEffect(() => {
-        if (pasajeroId) {
+        // La condición de carga ahora usa el ID de useAuth
+        if (pasajeroId) { 
             fetchMyReservations();
-        }
+        } 
+        // Si no está autenticado, podría haber una redirección
+        // manejada por Layout_Auth, pero el componente espera la data.
     }, [pasajeroId]);
 
 
-    // Lógica de Cancelación: Envía la mutación para cancelar la reserva seleccionada.
+    // ... Lógica de Cancelación (handleCancelReservation) (Mantenida sin cambios) ...
+
     const handleCancelReservation = async () => {
-        if (!selectedReservation) return;
+        if (!selectedReservation || !pasajeroId) return; // Asegurar que pasajeroId existe
 
         setIsCancelling(true);
         try {
             const variables = {
                 reservaId: selectedReservation.id,
-                pasajeroId: pasajeroId,
+                pasajeroId: pasajeroId, // <--- Uso de pasajeroId de useAuth
             };
 
             const data = await executeGraphQLQuery(CANCEL_RESERVATION_MUTATION, variables);
@@ -399,27 +569,25 @@ const MyReservations = () => {
                     title: "Cancelación Exitosa",
                     description: data.cancelarReserva.message || "Tu reserva ha sido cancelada correctamente.",
                 });
-                // Recarga la lista de reservas para actualizar el estado.
                 fetchMyReservations();
                 setIsDetailsDialogOpen(false);
                 setSelectedReservation(null);
                 setCancelReason("");
             } else {
-                // Lanza un error si la mutación no fue exitosa.
-                throw new Error(data?.cancelarReserva?.message || "La cancelación no pudo completarse."); // Mensaje simplificado.
+                throw new Error(data?.cancelarReserva?.message || "La cancelación no pudo completarse."); 
             }
         } catch (error) {
-            // Manejo de error con mensaje genérico para el usuario final.
             console.error("Error en la cancelación:", error);
             toast({
                 title: "Fallo en la cancelación",
-                description: `No se pudo cancelar la reserva. Por favor, intenta más tarde.`, // Mensaje simplificado.
+                description: `No se pudo cancelar la reserva. Por favor, intenta más tarde.`,
                 variant: "destructive",
             });
         } finally {
             setIsCancelling(false);
         }
     };
+
 
     // Determina si una reserva puede ser cancelada (ACTIVA y no ha iniciado el viaje).
     const isCancellable = useMemo(() => {
@@ -443,8 +611,29 @@ const MyReservations = () => {
         
         return estadoFrontend === 'EN_CURSO';
     }, [selectedReservation]);
-    
-    // Lógica de Paginación: Calcula las reservas a mostrar en la página actual.
+
+    // NUEVO: Determina si una reserva puede ser calificada.
+    const isRateable = useMemo(() => {
+        if (!selectedReservation) return false;
+        
+        const estadoFrontend = getFrontendStatus(
+            selectedReservation.estado, 
+            selectedReservation.viaje.fecha, 
+            selectedReservation.viaje.horaSalida,
+            selectedReservation.viaje.horaLlegada
+        );
+        
+        // 1. Debe estar FINALIZADA
+        const isFinished = estadoFrontend === 'FINALIZADA';
+        
+        // 2. No debe haber sido respondida
+        const alreadyAnswered = selectedReservation.encuestaRespondida ?? false;
+        
+        return isFinished && !alreadyAnswered;
+    }, [selectedReservation]);
+
+
+    // Lógica de Paginación.
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
     const currentReservations = reservations.slice(startIndex, endIndex);
@@ -459,6 +648,51 @@ const MyReservations = () => {
     const handleTrackVehicle = () => {
         navigate(`/mapa?origen=${selectedReservation.viaje.origen}&destino=${selectedReservation.viaje.destino}&fechaSalida=${selectedReservation.viaje.fecha}&horaSalida=${selectedReservation.viaje.horaSalida}&horaLlegada=${selectedReservation.viaje.horaLlegada}`);
     };
+
+    // Función que se ejecuta al enviar exitosamente la encuesta.
+    const handleSuccessfulRating = () => {
+        // Cierra el diálogo de detalles (que contiene el botón de calificar)
+        setIsDetailsDialogOpen(false);
+        // Fuerza una recarga de las reservas para que el estado `encuestaRespondida` se actualice
+        fetchMyReservations();
+    };
+
+    // Manejo de estado de autenticación no listo o no autenticado
+    if (!isAuthReady) {
+        // Muestra un loader mientras se rehidrata el estado
+        return (
+            <Layout_Auth title="FleetGuard360" subtitle="Cargando...">
+                <div className="flex justify-center items-center h-full min-h-[300px]">
+                    <Bus className="h-10 w-10 animate-spin text-bus-primary" />
+                    <p className="ml-3 text-lg font-medium">Cargando datos de sesión...</p>
+                </div>
+            </Layout_Auth>
+        );
+    }
+
+    if (!isAuthenticated || !pasajeroId) {
+        // Aunque Layout_Auth debería manejar la redirección, 
+        // esto actúa como una segunda capa de seguridad si la ruta no está bien protegida.
+        // Lo ideal es que Layout_Auth haga la redirección a /login
+        return (
+            <Layout_Auth title="FleetGuard360" subtitle="Mis Reservas">
+                <div className="max-w-xl mx-auto text-center py-20 bg-white shadow-lg rounded-xl p-8">
+                      <LogIn className="h-12 w-12 text-bus-primary mx-auto mb-4" />
+                      <h2 className="text-2xl font-bold mb-4">Acceso Requerido</h2>
+                      <p className="text-muted-foreground mb-6">
+                        Debe ingresar para ver sus reservas. <br></br>
+                        Por favor, inicie sesión.
+                      </p>
+                      <Button asChild className="bg-bus-primary hover:bg-bus-primary/90">
+                        <Link to="/login">
+                          <LogIn className="h-4 w-4 mr-2" />
+                          Ingresar
+                        </Link>
+                      </Button>
+                    </div>
+            </Layout_Auth>
+        );
+    }
 
     return (
         <Layout_Auth title="FleetGuard360" subtitle="Mis Reservas">
@@ -505,20 +739,20 @@ const MyReservations = () => {
                             </div>
                         ) : currentReservations.length === 0 ? (
                             <div className="text-center py-12">
-                                <Plane className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                                <p className="text-muted-foreground text-lg">
-                                    No tiene reservas en su historial.
-                                </p>
-                                <p className="text-sm text-muted-foreground mt-2">
-                                    ¡Empiece buscando su próximo viaje!
-                                </p>
-                                <Button
-                                    onClick={() => navigate('/search')}
-                                    className="mt-4 bg-bus-primary hover:bg-bus-primary/90"
-                                >
-                                    Buscar Viajes
-                                </Button>
-                            </div>
+                                <Bus className="h-12 w-12 text-muted-foreground mx-auto mb-4" /> {/* Cambiado de Plane a Bus */}
+                                <p className="text-muted-foreground text-lg">
+                                    No tiene reservas en su historial.
+                                </p>
+                                <p className="text-sm text-muted-foreground mt-2">
+                                    ¡Empiece buscando su próximo viaje!
+                                </p>
+                                <Button
+                                    onClick={() => navigate('/search')}
+                                    className="mt-4 bg-bus-primary hover:bg-bus-primary/90"
+                                >
+                                    Buscar Viajes
+                                </Button>
+                            </div>
                         ) : (
                             <div className="space-y-4">
                                 {currentReservations.map((reserva) => (
@@ -614,12 +848,12 @@ const MyReservations = () => {
 
             {/* DIALOGO DE DETALLES DE RESERVA (MODAL) */}
             <Dialog open={isDetailsDialogOpen} onOpenChange={(open) => {
-                setIsDetailsDialogOpen(open);
-                if (!open) {
-                    setSelectedReservation(null);
-                    setCancelReason("");
-                }
-            }}>
+                    setIsDetailsDialogOpen(open);
+                    if (!open) {
+                        setSelectedReservation(null);
+                        setCancelReason("");
+                    }
+                }}>
                 <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
@@ -673,52 +907,87 @@ const MyReservations = () => {
                             <div className="pt-2">
                                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                                     <X className="h-3 w-3 text-bus-danger" /> 
-                                    **Política de cancelación:** Se permite cancelar hasta la hora de salida sin ninguna penalidad.
+                                    Política de cancelación: Se permite cancelar hasta la hora de salida sin ninguna penalidad.
                                 </p>
                             </div>
 
                         </div>
                     )}
-
+                    {/* NUEVO MODAL DE CALIFICACIÓN */}
+                    {isRatingDialogOpen && selectedReservation && (
+                        <CalificarServiceDialog
+                            reservaId={selectedReservation.id}
+                            onClose={() => setIsRatingDialogOpen(false)}
+                            onSuccessfulSubmit={handleSuccessfulRating}
+                        />
+                    )}
                     {/* BOTONES DE ACCIÓN */}
-                    <div className="flex flex-col gap-3 pt-4 border-t">
-                        <Button
-                            onClick={handleTrackVehicle}
-                            disabled={!isTrackable}
-                            className="bg-bus-primary hover:bg-bus-primary/90 transition-smooth"
-                        >
-                            <Car className="h-4 w-4 mr-2" />
-                            Seguir Vehículo
-                        </Button>
+                        <div className="flex flex-col gap-3 pt-4 border-t">
+                        {/* 1. Botón Seguir Vehículo: Solo se muestra si isTrackable es true */}
+                        {selectedReservation && isTrackable && (
+                            <Button
+                                onClick={handleTrackVehicle}
+                                className="bg-bus-primary hover:bg-bus-primary/90 transition-smooth"
+                            >
+                                <Car className="h-4 w-4 mr-2" />
+                                Seguir Vehículo
+                            </Button>
+                        )}
 
-                        <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                                <Button 
-                                    variant="destructive" 
-                                    disabled={!isCancellable || isCancelling}
-                                    className="w-full"
-                                >
-                                    <X className="h-4 w-4 mr-2" />
-                                    {isCancelling ? "Cancelando..." : "Cancelar Reserva"}
-                                </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>¿Está seguro de cancelar la reserva?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        Esta acción no se puede deshacer. La cancelación está permitida sin penalidad hasta la hora de salida.
-                                    </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <div className="space-y-2">
-                                    <Label htmlFor="cancel-reason">Motivo de Cancelación (Opcional)</Label>
-                                    <Textarea 
-                                        id="cancel-reason" 
-                                        placeholder="Escribe tu motivo aquí..." 
-                                        value={cancelReason}
-                                        onChange={(e) => setCancelReason(e.target.value)}
-                                        disabled={isCancelling}
-                                    />
-                                </div>
+                        {/* 2. Botón Calificar Servicio: Solo se muestra si la reserva está FINALIZADA Y no ha sido calificada (isRateable) */}
+                        {selectedReservation && 
+                        getFrontendStatus(
+                            selectedReservation.estado, 
+                            selectedReservation.viaje.fecha, 
+                            selectedReservation.viaje.horaSalida, 
+                            selectedReservation.viaje.horaLlegada
+                        ) === 'FINALIZADA' && (
+                            <Button
+                                onClick={() => setIsRatingDialogOpen(true)}
+                                // Ya que el botón debe ser visible si está FINALIZADA, pero disabled si ya se respondió, 
+                                // mantenemos el estado disabled, pero solo lo mostramos si es FINALIZADA.
+                                disabled={!isRateable}
+                                className={cn(
+                                    "w-full transition-smooth",
+                                    isRateable ? "bg-yellow-500 hover:bg-yellow-600/90" : "bg-gray-400 cursor-not-allowed"
+                                )}
+                            >
+                                <Star className="h-4 w-4 mr-2" />
+                                {selectedReservation.encuestaRespondida ? "Servicio Calificado" : "Calificar Servicio"}
+                            </Button>
+                        )}
+
+                        {/* 3. Botón Cancelar Reserva: Solo se muestra si isCancellable es true */}
+                        {selectedReservation && isCancellable && (
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <Button 
+                                        variant="destructive" 
+                                        disabled={isCancelling} // Mantenemos la lógica de loading/cancelling
+                                        className="w-full"
+                                    >
+                                        <X className="h-4 w-4 mr-2" />
+                                        {isCancelling ? "Cancelando..." : "Cancelar Reserva"}
+                                    </Button>
+                                </AlertDialogTrigger>
+                                {/* El contenido de AlertDialogContent se mantiene igual */}
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>¿Está seguro de cancelar la reserva?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            Esta acción no se puede deshacer. La cancelación está permitida sin penalidad hasta la hora de salida.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="cancel-reason">Motivo de Cancelación (Opcional)</Label>
+                                        <Textarea 
+                                            id="cancel-reason" 
+                                            placeholder="Escribe tu motivo aquí..." 
+                                            value={cancelReason}
+                                            onChange={(e) => setCancelReason(e.target.value)}
+                                            disabled={isCancelling}
+                                        />
+                                    </div>
                                 <AlertDialogFooter>
                                     <AlertDialogCancel disabled={isCancelling}>No</AlertDialogCancel>
                                     <AlertDialogAction 
@@ -731,7 +1000,8 @@ const MyReservations = () => {
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
-                    </div>
+                    )}
+                </div>
                 </DialogContent>
             </Dialog>
         </Layout_Auth>

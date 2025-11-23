@@ -11,6 +11,7 @@ import 'leaflet/dist/leaflet.css';
 // MODIFICACIÓN: Se importa 'addDays' para manejar el cruce de medianoche.
 import { format, differenceInMilliseconds, addMilliseconds, addDays } from "date-fns";
 import { es } from "date-fns/locale";
+import { useAuth } from "@/hooks/useAuth";
 
 // --- Configuración de Constantes ---
 // const VELOCIDAD_CONSTANTE_KMH = 80; // Eliminada: Velocidad de simulación en km/h
@@ -210,7 +211,11 @@ const calculateBusPosition = (routeData: RouteData | null, departureTime: Date):
 };
 
 // --- Componente Principal ---
+
+
+
 const MapPage = () => {
+    const { isAuthenticated, user } = useAuth();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     
@@ -279,8 +284,8 @@ const MapPage = () => {
     useEffect(() => {
         const loadRoute = async () => {
             // Validación de datos de llegada
-            if (isDataMissing || !departureTime || !arrivalTime || !pasajeroId) {
-                if (pasajeroId && (isDataMissing || !departureTime || !arrivalTime)) {
+            if (!isAuthenticated || isDataMissing || !departureTime || !arrivalTime) {
+                if (isAuthenticated && (isDataMissing || !departureTime || !arrivalTime)) {
                      setError("Por favor, seleccione un viaje desde 'Mis Reservas'");
                 }
                 setIsLoading(false);
@@ -408,10 +413,9 @@ const MapPage = () => {
         return { recorred: recorredSegment, remaining: remainingSegment };
     }, [routeData, busPosition, recorredDistanceKm]);
 
-
-    if (!pasajeroId) {
+    if (!isAuthenticated) {
     return (
-      <Layout title="FleetGuard360" subtitle="Búsqueda de Viajes">
+      <Layout_Auth title="FleetGuard360" subtitle="Búsqueda de Viajes">
         <div className="max-w-xl mx-auto text-center py-20 bg-white shadow-lg rounded-xl p-8">
           <LogIn className="h-12 w-12 text-bus-primary mx-auto mb-4" />
           <h2 className="text-2xl font-bold mb-4">Acceso Requerido</h2>
@@ -426,7 +430,7 @@ const MapPage = () => {
             </Link>
           </Button>
         </div>
-      </Layout>
+      </Layout_Auth>
     );
   }
     

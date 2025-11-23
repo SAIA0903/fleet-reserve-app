@@ -8,6 +8,10 @@ import { Link } from "react-router-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Layout_Auth from "@/components/Layout_Auth";
+// ************************************************
+// 1. IMPORTAR useAuth
+import { useAuth } from "@/hooks/useAuth"; 
+// ************************************************
 import {
     MapPin,
     Calendar as CalendarIcon,
@@ -30,7 +34,6 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
 // Función de utilidad para manejar fechas en formato YYYY-MM-DD (sin hora)
-// Esto evita que la fecha se muestre como el día anterior debido a la conversión UTC/local
 const parseDateForDisplay = (dateString: string) => {
     // Si la cadena es nula o vacía, devuelve una fecha actual o un objeto Date no válido
     if (!dateString) return new Date(); 
@@ -50,6 +53,13 @@ const parseDateForDisplay = (dateString: string) => {
 interface Pasajero {
     nombre: string;
     identificacion: string;
+}
+
+interface PasajeroAuthData {
+    id: string;
+    nombre: string;
+    apellido: string;
+    // Otros campos que vengan en PasajeroData del hook (puedes añadir más si existen)
 }
 
 interface Viaje {
@@ -78,13 +88,16 @@ interface GraphQLResponse {
 
 // --- Componente principal de Reserva ---
 const ReservationPage = () => {
-    // Inicializa hooks para navegación, notificaciones (toast) y parámetros de URL.
     const navigate = useNavigate();
     const { toast } = useToast();
     const [searchParams] = useSearchParams();
 
+    // ************************************************
+    // MODIFICACIÓN 2: Usar useAuth para el estado de autenticación.
+    const { isAuthenticated, isAuthReady, pasajeroData } = useAuth();
+    // ************************************************
+
     // --- Extracción de datos del Viaje desde la URL (Query Params) ---
-    // Procesa los parámetros de la URL para construir el objeto de datos del viaje.
     const viajeData: Viaje = useMemo(() => {
         const id = searchParams.get('viajeId') || '';
         const origen = searchParams.get('viajeOrigen') || '';
@@ -94,7 +107,7 @@ const ReservationPage = () => {
         const cuposStr = searchParams.get('viajeCuposDisponibles');
         const cuposDisponibles = cuposStr ? parseInt(cuposStr, 10) : 0;
         
-        const horaLlegada = "N/A"; // No está en la URL, se mantiene como N/A si no viene del backend de éxito.
+        const horaLlegada = "N/A";
 
         return { id, origen, destino, fecha, horaSalida, cuposDisponibles, horaLlegada };
     }, [searchParams]);
@@ -105,42 +118,47 @@ const ReservationPage = () => {
     const isViajeDataMissing = !viaje.id || !viaje.origen || !viaje.destino || !viaje.fecha || !viaje.horaSalida;
 
 
-    // --- Extracción de datos del Pasajero desde LocalStorage ---
-    // Obtiene el nombre completo del pasajero principal de LocalStorage.
+    // ************************************************
+    // MODIFICACIÓN 3: Obtener datos del Pasajero desde useAuth
     const pasajeroNombreCompleto = useMemo(() => {
-        const nombre = localStorage.getItem('pasajeroNombre') || '';
-        const apellido = localStorage.getItem('pasajeroApellido') || '';
+        // Usamos el `pasajeroData` del hook (o un objeto vacío si es null/undefined)
+        const data = pasajeroData as PasajeroAuthData || { id: '', nombre: '', apellido: '' }; 
+        const nombre = data.nombre || '';
+        const apellido = data.apellido || '';
         return { nombre, apellido, completo: `${nombre} ${apellido}`.trim() };
-    }, []);
+    }, [pasajeroData]);
 
-    // Obtiene el ID del pasajero principal de LocalStorage.
-    const pasajeroId = useMemo(() => localStorage.getItem('pasajeroId'), []);
+    const pasajeroId = useMemo(() => pasajeroData?.id || null, [pasajeroData]);
+    // ************************************************
     
-    // Bandera para verificar si faltan datos del pasajero principal.
-    const isPasajeroDataMissing = !pasajeroNombreCompleto.nombre || !pasajeroId;
-
-
-    // --- Estados del Formulario ---
-    // Almacena la cantidad de asientos a reservar.
+    // --- Estados del Formulario (Se mantienen sin cambios) ---
     const [asientos, setAsientos] = useState(1);
-    // Almacena los datos de los pasajeros adicionales.
     const [pasajerosAdicionales, setPasajerosAdicionales] = useState<Pasajero[]>([]);
-    // Almacena los errores de validación del formulario.
     const [errors, setErrors] = useState<Record<string, string>>({});
-    // Indica si se está esperando una respuesta del servidor.
     const [loading, setLoading] = useState(false);
-    // Almacena el resultado de la operación de reserva.
     const [reservationResult, setReservationResult] = useState<GraphQLResponse | null>(null);
-    // -----------------------------
+    // ----------------------------------------------------------------------
+
+    // ************************************************
+    // MODIFICACIÓN 4: Bloqueo de página hasta que isAuthReady sea true.
+    if (!isAuthReady) {
+        return (
+            <Layout title="Cargando..." subtitle="Verificando sesión">
+                <div className="text-center py-20 text-muted-foreground">Cargando datos de sesión...</div>
+            </Layout>
+        );
+    }
+    // ************************************************
 
     // ----------------------------------------------------------------------
-    // --- VALIDACIÓN Y REDIRECCIÓN INICIAL ---
+    // --- VALIDACIÓN Y REDIRECCIÓN INICIAL (Actualizada) ---
     // ----------------------------------------------------------------------
     
-    // 1. Prioridad: Falta información del Pasajero (LocalStorage) -> Ir a Registro
-    if (!pasajeroId) {
+    // 1. Prioridad: Falta información del Pasajero (NO Autenticado) -> Ir a Login
+    if (!isAuthenticated || !pasajeroId) {
     return (
-      <Layout title="FleetGuard360" subtitle="Búsqueda de Viajes">
+      // Usamos Layout normal ya que no estamos logueados
+      <Layout title="FleetGuard360" subtitle="Reservar Viaje">
         <div className="max-w-xl mx-auto text-center py-20 bg-white shadow-lg rounded-xl p-8">
           <LogIn className="h-12 w-12 text-bus-primary mx-auto mb-4" />
           <h2 className="text-2xl font-bold mb-4">Acceso Requerido</h2>
@@ -161,6 +179,7 @@ const ReservationPage = () => {
 
     // 2. Segunda Prioridad: Falta información del Viaje (URL) -> Ir a Búsqueda
     if (isViajeDataMissing) {
+        // Usamos Layout_Auth ya que la autenticación es exitosa
         return <Layout_Auth title="Error" subtitle="Datos de viaje incompletos">
             <div className="text-center py-20 space-y-4">
                 <p className="text-xl font-bold text-red-600"> No se pudo cargar el viaje.</p>
@@ -182,13 +201,13 @@ const ReservationPage = () => {
     if (reservationResult && reservationResult.success && reservationResult.reserva) {
         const reserva = reservationResult.reserva;
         
-        // Se utiliza la fecha del viaje de la URL para el display.
         const displayedViaje: Viaje = {
             ...viaje,
-            horaLlegada: reserva.viaje?.horaLlegada || viaje.horaLlegada // Usar horaLlegada del resultado si está disponible
+            horaLlegada: reserva.viaje?.horaLlegada || viaje.horaLlegada
         };
         
         return (
+            // Uso de Layout_Auth
             <Layout_Auth title="Reserva Confirmada" subtitle="¡Tu viaje está asegurado!">
                 <div className="max-w-xl mx-auto space-y-8 text-center">
                     <CheckCircle className="h-20 w-20 mx-auto text-green-500" />
@@ -211,7 +230,6 @@ const ReservationPage = () => {
                             <h4 className="text-lg font-bold border-b pb-2 pt-4 text-bus-primary">Detalles del Viaje</h4>
                             <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-muted-foreground" /> <strong>Ruta:</strong> {displayedViaje.origen} <ArrowRight className="h-3 w-3" /> {displayedViaje.destino}</div>
-                                {/* USAMOS displayedViaje.fecha (Que viene del URL) */}
                                 <div className="flex items-center gap-2"><CalendarIcon className="h-4 w-4 text-muted-foreground" /> <strong>Fecha Viaje:</strong> {format(parseDateForDisplay(displayedViaje.fecha), "PPP", { locale: es })}</div> 
                                 <div className="flex items-center gap-2"><Clock className="h-4 w-4 text-muted-foreground" /> <strong>Salida:</strong> {displayedViaje.horaSalida}</div>
                                 <div className="flex items-center gap-2"><Clock className="h-4 w-4 text-muted-foreground" /> <strong>Llegada:</strong> {displayedViaje.horaLlegada || 'N/A'}</div>
@@ -219,7 +237,6 @@ const ReservationPage = () => {
                         </CardContent>
                     </Card>
                     <div className="flex justify-center space-x-4">
-                        {/* Botón añadido para ir a la búsqueda */}
                         <Button 
                             onClick={() => navigate('/search')} 
                             variant="outline" 
@@ -229,7 +246,6 @@ const ReservationPage = () => {
                             Buscar otro Viaje
                         </Button>
                         
-                        {/* Botón original */}
                         <Button onClick={() => navigate('/mis-reservas')} className="bg-bus-primary hover:bg-bus-primary/90">
                             Ver Mis Reservas
                         </Button>
@@ -242,6 +258,7 @@ const ReservationPage = () => {
     // Si la reserva falló, mostrar el mensaje de error
     if (reservationResult && !reservationResult.success) {
         return (
+            // Uso de Layout_Auth
             <Layout_Auth title="Reserva Fallida" subtitle="Ha ocurrido un error al procesar tu solicitud.">
                 <div className="max-w-xl mx-auto space-y-8 text-center">
                     <XCircle className="h-20 w-20 mx-auto text-red-500" />
@@ -261,15 +278,13 @@ const ReservationPage = () => {
         );
     }
 
-    // --- Lógica de Manejo de Asientos y Pasajeros Adicionales ---
-    // Función para manejar el incremento/decremento de asientos.
+    // --- Lógica de Manejo de Asientos y Pasajeros Adicionales (Se mantiene sin cambios) ---
     const handleSetAsientos = (newCount: number) => {
         if (newCount < 1) return;
         if (newCount > viaje.cuposDisponibles) return;
 
         setAsientos(newCount);
         
-        // Ajustar el array de pasajeros adicionales al número de asientos - 1.
         const additionalCount = newCount - 1;
         setPasajerosAdicionales(prev => {
             if (prev.length < additionalCount) {
@@ -283,7 +298,6 @@ const ReservationPage = () => {
         setErrors({});
     };
 
-    // Función para actualizar los datos de un pasajero adicional.
     const handlePassengerChange = (index: number, field: keyof Pasajero, value: string) => {
         setPasajerosAdicionales(prev => {
             const updated = [...prev];
@@ -293,7 +307,6 @@ const ReservationPage = () => {
         setErrors({});
     };
 
-    // Valida que todos los campos de pasajeros estén completos.
     const validateForm = (): boolean => {
         const newErrors: Record<string, string> = {};
         
@@ -314,8 +327,7 @@ const ReservationPage = () => {
         return Object.keys(newErrors).length === 0;
     };
 
-    // --- LÓGICA DE PETICIÓN GRAPHQL ---
-    // Función principal para enviar la solicitud de reserva al servidor GraphQL.
+    // --- LÓGICA DE PETICIÓN GRAPHQL (Se mantiene, usa pasajeroId del hook) ---
     const handleReservation = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -337,7 +349,8 @@ const ReservationPage = () => {
         // 1. Obtener datos requeridos
         const viajeIdInt = parseInt(viaje.id); 
 
-        if (!pasajeroId || isNaN(viajeIdInt)) {
+        // Se verifica el pasajeroId, el cual ya viene del useAuth.
+        if (!pasajeroId || isNaN(viajeIdInt)) { 
             toast({
                 title: "Error de Datos",
                 description: "Falta el ID del pasajero o el ID del viaje es inválido.",
@@ -386,7 +399,7 @@ const ReservationPage = () => {
         `;
 
         setLoading(true);
-        setReservationResult(null); // Limpiar resultado anterior
+        setReservationResult(null);
 
         try {
             const response = await fetch('http://localhost:8080/graphql', {
@@ -423,7 +436,6 @@ const ReservationPage = () => {
                     });
                 }
             } else if (jsonResponse.errors) {
-                // Manejar errores de GraphQL
                 const errorMsg = jsonResponse.errors.map((e: any) => e.message).join(' | ');
                 setReservationResult({ success: false, message: `Error en la solicitud: ${errorMsg}` });
                 toast({
@@ -435,7 +447,6 @@ const ReservationPage = () => {
 
         } catch (error: any) {
             console.error("Error al realizar la reserva:", error);
-            // Mensaje de error modificado para no revelar detalles de la conexión
             setReservationResult({ success: false, message: `No se pudo completar la reserva. Inténtalo de nuevo.` });
             toast({
                 title: "Error de Conexión",
@@ -449,6 +460,7 @@ const ReservationPage = () => {
 
     // --- Renderizado del Formulario ---
     return (
+        // Uso de Layout_Auth
         <Layout_Auth title="FleetGuard 360" subtitle={"Reservar Viaje"}>
             <div className="max-w-4xl mx-auto space-y-8">
                 
@@ -483,7 +495,6 @@ const ReservationPage = () => {
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm bg-gray-50/50 p-4 rounded-lg">
                                 <div className="flex items-center gap-1"><MapPin className="h-4 w-4 text-muted-foreground" /><span className="font-medium">Origen: {viaje.origen}</span></div>
                                 <div className="flex items-center gap-1"><ArrowRight className="h-4 w-4 text-muted-foreground" /><span className="font-medium">Destino: {viaje.destino}</span></div>
-                                {/* APLICACIÓN DE LA CORRECCIÓN: parseDateForDisplay */}
                                 <div className="flex items-center gap-1"><CalendarIcon className="h-4 w-4 text-muted-foreground" /><span className="font-medium">Fecha: {format(parseDateForDisplay(viajeData.fecha), "PPP", { locale: es })}</span></div>
                                 <div className="flex items-center gap-1"><Clock className="h-4 w-4 text-muted-foreground" /><span className="font-medium">Hora: {viaje.horaSalida}</span></div>
                             </div>
@@ -522,17 +533,17 @@ const ReservationPage = () => {
                                 Cupos disponibles: {viaje.cuposDisponibles - asientos}
                             </p>
 
-                            {/* Bloque: Información del Pasajero Principal (Datos de LocalStorage) */}
+                            {/* Bloque: Información del Pasajero Principal (Datos del useAuth) */}
                             <h3 className="flex items-center gap-2 text-lg font-semibold border-b pb-2 pt-4 mb-4 text-bus-primary">
                                 <User className="h-5 w-5" /> Pasajero Principal (Tú)
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Input value={pasajeroNombreCompleto.nombre} disabled placeholder="Nombre" />
                                 <Input value={pasajeroNombreCompleto.apellido} disabled placeholder="Apellido" />
-                                {/* Se ha ELIMINADO el input para el pasajeroId/Identificación del principal */}
+                                <Input value={pasajeroId || ''} disabled placeholder="Identificación" className="col-span-full md:col-span-1" />
                             </div>
 
-                            {/* Bloque: Pasajeros Adicionales */}
+                            {/* Bloque: Pasajeros Adicionales (Se mantiene sin cambios) */}
                             {asientos > 1 && (
                                 <>
                                     <h3 className="flex items-center gap-2 text-lg font-semibold border-b pb-2 pt-4 mb-4 text-bus-primary">
@@ -570,7 +581,7 @@ const ReservationPage = () => {
                                 </>
                             )}
                             
-                            {/* Política de Cancelación */}
+                            {/* Política de Cancelación (Se mantiene sin cambios) */}
                             <div className="flex items-start gap-2 p-3 text-sm bg-bus-info/10 border border-bus-info text-bus-info rounded-lg">
                                 <Info className="h-5 w-5 mt-0.5 flex-shrink-0" />
                                 <p className="font-medium">
@@ -578,7 +589,7 @@ const ReservationPage = () => {
                                 </p>
                             </div>
 
-                            {/* Botón Final de Reserva */}
+                            {/* Botón Final de Reserva (Se mantiene sin cambios) */}
                             <Button
                                 type="submit"
                                 className="w-full bg-accent hover:bg-accent-hover text-accent-foreground shadow-button transition-smooth h-12 text-lg font-semibold"
